@@ -1,0 +1,360 @@
+/* ==========================================================================
+   Results screen
+   ========================================================================== */
+
+.results {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 24px 64px;
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 30px;
+}
+
+/* Hero */
+.results-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 28px;
+  align-items: end;
+  margin-bottom: 36px;
+}
+
+.results-hero h1 {
+  margin: 8px 0 12px;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 5vw, 56px);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+
+.results-hero p {
+  margin: 0;
+  max-width: 560px;
+  color: var(--text-dim);
+  font-size: 16px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.hero-footnote {
+  margin-top: 12px !important;
+  font-size: 13px !important;
+  color: var(--text-faint) !important;
+}
+
+/* Podium */
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  gap: 10px;
+}
+
+.podium-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  animation: podium-in 0.7s var(--ease-spring) both;
+}
+
+@keyframes podium-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+.podium-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.podium-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding-top: 12px;
+  border-radius: 14px 14px 6px 6px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--line-strong);
+}
+
+.place-1 .podium-block {
+  height: 130px;
+  color: #ffd66b;
+  background: linear-gradient(180deg, rgba(255, 197, 61, 0.28), rgba(255, 197, 61, 0.04));
+  border-color: rgba(255, 197, 61, 0.45);
+  box-shadow: 0 0 50px -12px rgba(255, 197, 61, 0.5);
+}
+
+.place-2 .podium-block {
+  height: 96px;
+  color: #d9def5;
+}
+
+.place-3 .podium-block {
+  height: 72px;
+  color: #e6a877;
+}
+
+.podium-slot.empty {
+  visibility: hidden;
+}
+
+.results-note {
+  margin: -16px 0 24px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 197, 61, 0.08);
+  border: 1px solid rgba(255, 197, 61, 0.25);
+  color: #ffe2a0;
+  font-size: 14px;
+}
+
+/* Grid */
+.results-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  align-items: start;
+}
+
+.section-title {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Group cards */
+.group-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.group-card {
+  position: relative;
+  overflow: hidden;
+  padding: 16px 16px 14px;
+  border-radius: 20px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--g) 22%, transparent), transparent 60%),
+    var(--panel);
+  border: 1px solid color-mix(in srgb, var(--g) 35%, transparent);
+  box-shadow:
+    var(--shadow-card),
+    0 0 40px -22px var(--g);
+  animation: card-in 0.55s var(--ease-out) both;
+}
+
+.group-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 3px;
+  background: var(--g);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+.group-card header {
+  margin-bottom: 10px;
+}
+
+.group-card h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--g);
+  text-transform: uppercase;
+}
+
+.group-card-range {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.group-card ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-card li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px 0 6px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.gc-pos {
+  width: 22px;
+  flex: none;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* Finishing order */
+.order-list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  border-radius: 20px;
+}
+
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 8px 0 4px;
+  border-radius: 11px;
+}
+
+.order-row:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.order-pos {
+  width: 26px;
+  flex: none;
+  text-align: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-pos.top {
+  color: var(--gold);
+}
+
+.order-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.order-time {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-group {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #0b0d1a;
+  background: var(--g);
+}
+
+/* Responsive */
+@media (max-width: 960px) {
+  .results-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .podium {
+    max-width: 420px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .results-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .hide-sm {
+    display: none;
+  }
+
+  .results {
+    padding: 16px 16px 48px;
+  }
+
+  .results-header {
+    margin-bottom: 18px;
+  }
+
+  .hero-actions .btn {
+    flex: 1 1 100%;
+  }
+
+  .place-1 .podium-block {
+    height: 100px;
+  }
+
+  .place-2 .podium-block {
+    height: 76px;
+  }
+
+  .place-3 .podium-block {
+    height: 58px;
+  }
+
+  .group-cards {
+    grid-template-columns: 1fr;
+  }
+}
