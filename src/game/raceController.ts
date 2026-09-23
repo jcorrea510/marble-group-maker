@@ -51,6 +51,8 @@ export interface HudState {
   standings: StandingRow[];
   followIndex: number | null;
   showGo: boolean;
+  /** True during the brief slow-motion "photo finish". */
+  photoFinish: boolean;
 }
 
 export interface RaceControllerOptions {
@@ -87,6 +89,8 @@ export class RaceController {
   private readonly reducedMotion: boolean;
   private readonly expected: { progress: number; time: number }[];
   private cssW = 0;
+  private slowmoLeft = 0;
+  private slowmoUsed = false;
   /** Race order as shown on screen (see `updateStandings`). */
   private standings: MarbleState[] = [];
 
@@ -199,7 +203,9 @@ export class RaceController {
         this.raceWall += dt;
         if (this.gateOpenFor !== null) this.gateOpenFor += dt;
         this.updateSpeed(dt);
-        this.advancePhysics(dt * this.speed * debug);
+        this.checkPhotoFinish(dt);
+        const playback = this.slowmoLeft > 0 ? 0.4 : this.speed;
+        this.advancePhysics(dt * playback * debug);
         this.updateCamera(dt);
         if (this.sim.isComplete) {
           this.setPhase('finished');
@@ -314,6 +320,29 @@ export class RaceController {
     desired = Math.min(1.45, Math.max(0.85, desired));
     if (this.raceWall < 1.2) desired = 1;
     this.speed += (desired - this.speed) * Math.min(1, dt * 0.9);
+  }
+
+  /**
+   * If the two leaders reach the finish neck and neck, show it in slow
+   * motion once. (Only the playback slows down; the physics is unchanged.)
+   */
+  private checkPhotoFinish(dt: number) {
+    if (this.slowmoLeft > 0) {
+      this.slowmoLeft -= dt;
+      if (this.slowmoLeft <= 0) this.emitHud();
+      return;
+    }
+    if (this.slowmoUsed || this.sim.finishedCount > 0 || this.reducedMotion) return;
+    const [a, b] = this.sim.standings();
+    if (!a || !b) return;
+    const finishY = this.opts.track.finishY;
+    const ay = a.body.position.y;
+    const by = b.body.position.y;
+    if (ay > finishY - 130 && ay < finishY && Math.abs(ay - by) < 40 && Math.abs(a.body.position.x - b.body.position.x) < 180) {
+      this.slowmoUsed = true;
+      this.slowmoLeft = 1.1;
+      this.emitHud();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -468,6 +497,7 @@ export class RaceController {
       standings,
       followIndex: this.followIndex,
       showGo: this.phase === 'racing' && this.phaseTime < 0.8,
+      photoFinish: this.slowmoLeft > 0,
     });
   }
 

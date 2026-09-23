@@ -76,7 +76,10 @@ export function ResultsScreen({ result, onRaceAgain, onEdit, toast }: Props) {
         <Logo />
         <div className="results-header-actions">
           <button className="btn btn-ghost" onClick={handleCopy} data-testid="copy-groups">
-            <CopyIcon size={16} /> Copy groups
+            <CopyIcon size={16} />
+            <span>
+              Copy<span className="hide-sm"> groups</span>
+            </span>
           </button>
         </div>
       </header>

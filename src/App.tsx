@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { validateSetup } from './game/grouping';
+import { MAX_PARTICIPANTS, MIN_PARTICIPANTS } from './game/names';
 import { Rng, randomSeed } from './game/rng';
 import type { Participant, RaceResult } from './game/types';
 import { loadState, saveState } from './storage';
@@ -66,11 +68,17 @@ export default function App() {
   const handleStart = useCallback(() => startRace(participants, groupCount), [participants, groupCount, startRace]);
 
   /** Same people, same number of groups, brand-new course, reshuffled start grid. */
+  const showToast = toasts.show;
   const handleRaceAgain = useCallback(() => {
-    const people = participants.length > 0 ? participants : (race?.startOrder ?? []);
-    const groups = lastResult?.groupCount ?? groupCount;
-    startRace(new Rng(randomSeed()).shuffle(people), groups);
-  }, [participants, race, lastResult, groupCount, startRace]);
+    // The list may have been edited since the last race, so check it again.
+    const check = validateSetup(participants.length, groupCount, { min: MIN_PARTICIPANTS, max: MAX_PARTICIPANTS });
+    if (!check.ok) {
+      setScreen('setup');
+      showToast(check.message);
+      return;
+    }
+    startRace(new Rng(randomSeed()).shuffle(participants), groupCount);
+  }, [participants, groupCount, startRace, showToast]);
 
   const handleComplete = useCallback((result: RaceResult) => {
     setLastResult(result);

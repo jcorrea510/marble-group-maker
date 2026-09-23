@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { nextFreeColorIndex, groupColor } from '../game/colors';
 import { describeGroupSizes, groupSizes, validateSetup } from '../game/grouping';
 import { MAX_PARTICIPANTS, MIN_PARTICIPANTS, parseNames, uniqueName } from '../game/names';
@@ -101,7 +101,9 @@ export function SetupScreen({
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      if ((e.ctrlKey || e.metaKey) && !draft.trim()) return; // nothing typed: let Ctrl+Enter start the race
       e.preventDefault();
+      e.stopPropagation(); // typed names are added first; press again to start
       commitDraft();
     }
   }
@@ -151,6 +153,19 @@ export function SetupScreen({
     setLastSyncedGroupCount(next); // don't overwrite what the user is typing
     onGroupCountChange(next);
   }
+
+  // Ctrl/Cmd + Enter starts the race from anywhere on the page.
+  const canStart = validation.ok;
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canStart) {
+        e.preventDefault();
+        onStart();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canStart, onStart]);
 
   const groupPickerMax = Math.max(2, Math.min(MAX_PARTICIPANTS, count));
   const quickPicks = [2, 3, 4, 5, 6].filter((n) => n <= Math.max(6, count));
@@ -214,7 +229,8 @@ export function SetupScreen({
           </div>
           <p className="hint">
             <span className="kbd">Enter</span> adds · <span className="kbd">Shift</span>+<span className="kbd">Enter</span>{' '}
-            new line · pasting a list adds everyone at once
+            new line · pasting a list adds everyone at once · <span className="kbd">Ctrl</span>+
+            <span className="kbd">Enter</span> starts
           </p>
 
           {count === 0 ? (

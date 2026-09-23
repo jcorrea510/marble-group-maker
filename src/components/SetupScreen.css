@@ -16,37 +16,6 @@
   margin-bottom: 36px;
 }
 
-/* Logo */
-.logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 19px;
-  letter-spacing: -0.02em;
-}
-
-.logo-mark {
-  width: 40px;
-  height: 34px;
-  filter: drop-shadow(0 4px 12px rgba(124, 92, 255, 0.45));
-}
-
-.logo-text span {
-  color: var(--text-dim);
-  font-weight: 600;
-}
-
-.logo-compact {
-  font-size: 16px;
-}
-
-.logo-compact .logo-mark {
-  width: 32px;
-  height: 27px;
-}
-
 /* Hero */
 .setup-hero {
   max-width: 720px;
@@ -571,6 +540,11 @@
 
   .hint {
     display: none;
+  }
+
+  .name-input textarea {
+    min-height: 84px;
+    font-size: 16px;
   }
 
   .add-btn {

@@ -134,6 +134,12 @@ export const EyeIcon = (p: IconProps) => (
   </svg>
 );
 
+export const FullscreenIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
+  </svg>
+);
+
 export const ForwardIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="m13 17 5-5-5-5M6 17l5-5-5-5" />

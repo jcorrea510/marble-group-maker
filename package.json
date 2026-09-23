@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "description": "Randomly split a group of people into teams with a physics-based marble race.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

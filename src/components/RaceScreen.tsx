@@ -6,7 +6,7 @@ import { generateTrack } from '../game/track/generator';
 import type { RaceResult } from '../game/types';
 import { Logo } from './Logo';
 import { MarbleSwatch } from './MarbleSwatch';
-import { ArrowLeftIcon, CheckIcon, ForwardIcon, SoundOffIcon, SoundOnIcon } from './Icons';
+import { ArrowLeftIcon, CheckIcon, ForwardIcon, FullscreenIcon, SoundOffIcon, SoundOnIcon } from './Icons';
 import './RaceScreen.css';
 
 interface Props {
@@ -87,6 +87,12 @@ export function RaceScreen({ config, muted, onToggleMute, onComplete, onExit }: 
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled === true;
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void document.documentElement.requestFullscreen().catch(() => {});
+  };
+
   const phase = hud?.phase ?? 'intro';
   const total = config.startOrder.length;
   const winner = hud?.standings.find((s) => s.rank === 1 && s.finished);
@@ -133,11 +139,16 @@ export function RaceScreen({ config, muted, onToggleMute, onComplete, onExit }: 
           >
             {muted ? <SoundOffIcon /> : <SoundOnIcon />}
           </button>
+          {canFullscreen && (
+            <button className="icon-btn" onClick={toggleFullscreen} aria-label="Toggle fullscreen" title="Fullscreen (great for projectors)">
+              <FullscreenIcon />
+            </button>
+          )}
         </div>
       </header>
 
       <div className="race-body">
-        <div className="race-stage" ref={stageRef}>
+        <div className={`race-stage${hud?.photoFinish ? ' slowmo' : ''}`} ref={stageRef}>
           <canvas ref={canvasRef} className="race-canvas" data-testid="race-canvas" />
           <div className="race-vignette" aria-hidden="true" />
 
@@ -170,6 +181,12 @@ export function RaceScreen({ config, muted, onToggleMute, onComplete, onExit }: 
           {hud?.showGo && (
             <div className="countdown" aria-live="assertive">
               <span className="countdown-num go">GO!</span>
+            </div>
+          )}
+
+          {hud?.photoFinish && (
+            <div className="photo-finish" aria-live="polite">
+              Photo finish!
             </div>
           )}
 

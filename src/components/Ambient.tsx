@@ -1,13 +1,14 @@
 import type { CSSProperties } from 'react';
 import { BASE_PALETTE } from '../game/colors';
 
+// Kept in the page margins so they never sit on top of content.
 const MARBLES = [
-  { x: '6%', y: '14%', size: 26, color: 0, delay: 0 },
-  { x: '92%', y: '22%', size: 18, color: 1, delay: -4 },
-  { x: '84%', y: '78%', size: 30, color: 2, delay: -8 },
-  { x: '10%', y: '82%', size: 16, color: 6, delay: -2 },
-  { x: '48%', y: '94%', size: 12, color: 3, delay: -11 },
-  { x: '70%', y: '6%', size: 10, color: 4, delay: -6 },
+  { x: '3%', y: '16%', size: 24, color: 0, delay: 0 },
+  { x: '95.5%', y: '24%', size: 16, color: 1, delay: -4 },
+  { x: '95%', y: '72%', size: 28, color: 2, delay: -8 },
+  { x: '2.5%', y: '80%', size: 16, color: 6, delay: -2 },
+  { x: '4%', y: '48%', size: 11, color: 3, delay: -11 },
+  { x: '94%', y: '48%', size: 10, color: 4, delay: -6 },
 ];
 
 /** Soft glowing background with a few floating marbles. */

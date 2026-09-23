@@ -326,6 +326,10 @@
 }
 
 @media (max-width: 560px) {
+  .hide-sm {
+    display: none;
+  }
+
   .results {
     padding: 16px 16px 48px;
   }
