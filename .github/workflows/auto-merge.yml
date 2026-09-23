@@ -1,0 +1,124 @@
+name: Auto-merge Claude PRs
+
+# Merges pull requests from `claude/...` branches into `main` automatically,
+# but only after the full CI workflow has passed on the exact commit being
+# merged. Afterwards it starts the GitHub Pages deployment.
+#
+# How it works:
+#   1. A `claude/...` branch opens (or updates) a PR  ->  CI runs.
+#   2. When CI finishes, this workflow runs ("workflow_run" event).
+#      GitHub always uses the copy of this file on `main`, so a pull
+#      request cannot change these rules for itself.
+#   3. It checks everything below, merges, then deploys the site.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write # merge the pull request
+  pull-requests: write # read it and leave a comment when it can't be merged
+  actions: write # start the Pages deployment
+  checks: read # double-check every check on the commit passed
+
+concurrency:
+  group: auto-merge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Merge after CI passes
+    # Only for: a successful CI run, triggered by a pull request, from a
+    # branch named claude/... that lives in this repository (never a fork).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'claude/') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Find the pull request and check it is safe to merge
+        id: check
+        run: |
+          set -euo pipefail
+          owner="${GH_REPO%%/*}"
+
+          pr_json=$(gh api "repos/$GH_REPO/pulls?state=open&base=main&head=$owner:$HEAD_BRANCH" --jq '.[0] // empty')
+          if [ -z "$pr_json" ]; then
+            echo "No open pull request from $HEAD_BRANCH into main. Nothing to do."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          number=$(jq -r '.number' <<< "$pr_json")
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Pull request #$number"
+
+          if [ "$(jq -r '.draft' <<< "$pr_json")" = "true" ]; then
+            echo "PR is a draft, not merging."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # CI must have tested the exact commit that would be merged.
+          head_sha=$(jq -r '.head.sha' <<< "$pr_json")
+          if [ "$head_sha" != "$TESTED_SHA" ]; then
+            echo "PR head ($head_sha) is newer than the commit CI tested ($TESTED_SHA). The next CI run will handle it."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Every check on that commit must have passed (not only CI).
+          bad=$(gh api "repos/$GH_REPO/commits/$TESTED_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.status != "completed" or (.conclusion | IN("success","skipped","neutral") | not)) | .name] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "Some checks have not passed yet: $bad"
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Changes to the automation or CI itself are not merged automatically,
+          # so CI can never be weakened (or this workflow bypassed) unseen.
+          workflow_files=$(gh api "repos/$GH_REPO/pulls/$number/files?per_page=100" --paginate \
+            --jq '.[] | select(.filename | startswith(".github/workflows/")) | .filename')
+          if [ -n "$workflow_files" ]; then
+            echo "PR changes workflow files, so a person must merge it:"
+            echo "$workflow_files"
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            echo "reason=workflows" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "All good: CI passed on $TESTED_SHA."
+          echo "merge=true" >> "$GITHUB_OUTPUT"
+
+      - name: Explain why this PR was not merged automatically
+        if: steps.check.outputs.reason == 'workflows'
+        run: |
+          marker="<!-- auto-merge:workflows -->"
+          existing=$(gh api "repos/$GH_REPO/issues/${{ steps.check.outputs.number }}/comments?per_page=100" \
+            --jq "[.[] | select(.body | contains(\"$marker\"))] | length")
+          if [ "$existing" = "0" ]; then
+            gh pr comment "${{ steps.check.outputs.number }}" --body "$marker
+          CI passed, but this pull request changes files in \`.github/workflows/\` (the CI and automation rules themselves), so it was **not merged automatically**. Please review and merge it by hand."
+          fi
+
+      - name: Merge into main
+        if: steps.check.outputs.merge == 'true'
+        run: |
+          # --match-head-commit refuses to merge if anything was pushed after CI ran.
+          gh pr merge "${{ steps.check.outputs.number }}" --merge --match-head-commit "$TESTED_SHA" \
+            --body "Merged automatically after CI passed: $CI_RUN_URL"
+
+      - name: Deploy the site to GitHub Pages
+        if: steps.check.outputs.merge == 'true'
+        # Merges made by a workflow don't trigger other workflows on their own,
+        # so start the deployment explicitly.
+        run: gh workflow run deploy-pages.yml --ref main
