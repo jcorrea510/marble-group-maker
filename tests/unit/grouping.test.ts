@@ -3,7 +3,9 @@ import {
   describeGroupSizes,
   groupIndexForPosition,
   groupSizes,
+  groupCountFor,
   splitIntoGroups,
+  validateGroupSetup,
   validateSetup,
 } from '../../src/game/grouping';
 
@@ -93,5 +95,30 @@ describe('validateSetup', () => {
     expect(validateSetup(4, 2, limits).ok).toBe(true);
     expect(validateSetup(10, 3, limits).ok).toBe(true);
     expect(validateSetup(4, 4, limits).ok).toBe(true);
+  });
+});
+
+describe('people-per-group mode', () => {
+  it('turns a group size into a group count (sizes never exceed it)', () => {
+    expect(groupCountFor(10, 'size', 4)).toBe(3);
+    expect(groupSizes(10, groupCountFor(10, 'size', 4))).toEqual([4, 3, 3]);
+    expect(groupCountFor(12, 'size', 4)).toBe(3);
+    expect(groupCountFor(12, 'size', 5)).toBe(3);
+    expect(groupCountFor(7, 'size', 1)).toBe(7);
+    expect(groupCountFor(8, 'groups', 3)).toBe(3);
+    for (let n = 2; n <= 50; n++) {
+      for (let size = 1; size <= n; size++) {
+        expect(Math.max(...groupSizes(n, groupCountFor(n, 'size', size)))).toBeLessThanOrEqual(size);
+      }
+    }
+  });
+
+  it('validates sizes', () => {
+    const limits = { min: 2, max: 50 };
+    expect(validateGroupSetup(10, 'size', 4, limits).ok).toBe(true);
+    expect(validateGroupSetup(10, 'size', 0, limits).ok).toBe(false);
+    expect(validateGroupSetup(3, 'size', 5, limits).message).toMatch(/only 3 people/);
+    expect(validateGroupSetup(0, 'size', 2, limits).ok).toBe(false);
+    expect(validateGroupSetup(4, 'groups', 5, limits).ok).toBe(false);
   });
 });

@@ -21,14 +21,21 @@ test('hundreds of races all finish cleanly', () => {
   const nudges = runs.reduce((s, r) => s + r.nudges, 0);
   const oob = runs.reduce((s, r) => s + r.outOfBounds, 0);
   const maxAttempts = Math.max(...runs.map((r) => r.attempts));
+  const falls = runs.map((r) => r.maxFreeFall).sort((a, b) => a - b);
+  const perMarble = runs.map((r) => r.medianFreeFall).sort((a, b) => a - b);
 
   process.stdout.write(
     `\n${runs.length} races | last finisher (physics seconds): p5=${pct(0.05)} median=${pct(0.5)} p95=${pct(0.95)} max=${pct(1)}\n` +
-      `timed out: ${timedOut.length} | anti-stuck nudges: ${nudges} | ghost rescues: ${rescues} | out-of-bounds: ${oob} | max generation attempts: ${maxAttempts}\n`,
+      `timed out: ${timedOut.length} | anti-stuck nudges: ${nudges} | ghost rescues: ${rescues} | out-of-bounds: ${oob} | max generation attempts: ${maxAttempts}\n` +
+      `longest untouched fall per race: median=${falls[Math.floor(falls.length / 2)].toFixed(0)} max=${falls[falls.length - 1].toFixed(0)} | typical marble: ${perMarble[Math.floor(perMarble.length / 2)].toFixed(0)}\n`,
   );
   for (const r of timedOut) process.stdout.write(`  TIMEOUT seed=${r.seed} count=${r.count}\n`);
 
   expect(timedOut).toEqual([]);
+  // Nobody gets a lucky ride down the course without hitting anything.
+  expect(falls[Math.floor(falls.length / 2)]).toBeLessThan(600);
+  expect(falls[falls.length - 1]).toBeLessThan(1100);
+  expect(perMarble[Math.floor(perMarble.length / 2)]).toBeLessThan(400);
   expect(oob).toBe(0);
   for (const r of runs) {
     expect(new Set(r.finishOrder).size).toBe(r.count);

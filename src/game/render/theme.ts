@@ -12,6 +12,9 @@ export const SECTION_COLORS: Record<SectionType, string> = {
   sliders: '#1ee3cf',
   drop: '#6b8cff',
   split: '#2ed573',
+  pendulums: '#ff4fd8',
+  cascade: '#b8f35a',
+  trampolines: '#fb7185',
   finish: '#ffc53d',
 };
 

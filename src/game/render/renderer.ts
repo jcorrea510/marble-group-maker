@@ -1,8 +1,8 @@
 import { marbleStyle, rgba } from '../colors';
 import { sliderEndpoints } from '../track/geometry';
-import { sliderOffset, spinnerAngle } from '../physics/kinematics';
+import { pendulumAngle, pendulumBob, sliderOffset, spinnerAngle } from '../physics/kinematics';
 import type { MarbleState, RaceSimulation } from '../physics/raceSimulation';
-import type { BumperItem, PegItem, SliderItem, SpinnerItem, Track, WallItem, ZoneItem } from '../track/types';
+import type { BumperItem, PegItem, PendulumItem, SliderItem, SpinnerItem, Track, WallItem, ZoneItem } from '../track/types';
 import { Camera } from './camera';
 import { Particles } from './particles';
 import { MarbleSprites } from './sprites';
@@ -34,6 +34,8 @@ interface LabelBox {
 
 const SPINNER_COLOR = '#ffd23f';
 const SLIDER_COLOR = '#1ee3cf';
+const PENDULUM_COLOR = '#ff4fd8';
+const TRAMPOLINE_COLOR = '#fb7185';
 const BUMPER_COLOR = '#ff9f1c';
 const TRAIL_LENGTH = 9;
 
@@ -49,6 +51,8 @@ export class RaceRenderer {
   private readonly bumpers: BumperItem[] = [];
   private readonly spinners: SpinnerItem[] = [];
   private readonly sliders: SliderItem[] = [];
+  private readonly pendulums: PendulumItem[] = [];
+  private readonly trampolines: WallItem[] = [];
   private readonly zones: ZoneItem[] = [];
   private readonly gates: WallItem[] = [];
   private readonly trails: Float64Array[];
@@ -69,6 +73,7 @@ export class RaceRenderer {
       switch (item.kind) {
         case 'wall': {
           if (gateSet.has(item.id)) this.gates.push(item);
+          else if (item.style === 'trampoline') this.trampolines.push(item);
           else if (item.style === 'wall') this.outerWalls.push(item);
           else {
             const top = Math.min(item.a.y, item.b.y) - item.thickness;
@@ -85,6 +90,9 @@ export class RaceRenderer {
           break;
         case 'spinner':
           this.spinners.push(item);
+          break;
+        case 'pendulum':
+          this.pendulums.push(item);
           break;
         case 'slider':
           this.sliders.push(item);
@@ -140,6 +148,8 @@ export class RaceRenderer {
     this.drawBumpers(top, bottom);
     this.drawSpinners(top, bottom, kinematicTime);
     this.drawSliders(top, bottom, kinematicTime);
+    this.drawTrampolines(top, bottom);
+    this.drawPendulums(top, bottom, kinematicTime);
     this.drawGate(frame.gateOpenFor, top, bottom);
     this.drawFinishLine(top, bottom, frame.clock);
 
@@ -453,6 +463,110 @@ export class RaceRenderer {
       ctx.arc(0, 0, s.armThickness * 0.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+    }
+  }
+
+  private drawTrampolines(top: number, bottom: number) {
+    const { ctx } = this;
+    const now = this.sim.worldTimeMs;
+    ctx.lineCap = 'round';
+    for (const tr of this.trampolines) {
+      if (Math.max(tr.a.y, tr.b.y) + 30 < top || Math.min(tr.a.y, tr.b.y) - 30 > bottom) continue;
+      const hit = this.sim.bumperHits.get(tr.id);
+      const flash = hit === undefined ? 0 : Math.max(0, 1 - (now - hit) / 240);
+      // Springs underneath.
+      const ux = tr.b.x - tr.a.x;
+      const uy = tr.b.y - tr.a.y;
+      const len = Math.hypot(ux, uy) || 1;
+      const nx = -uy / len;
+      const ny = ux / len;
+      const down = ny >= 0 ? 1 : -1;
+      ctx.strokeStyle = rgba(TRAMPOLINE_COLOR, 0.55);
+      ctx.lineWidth = 2;
+      for (const f of [0.2, 0.5, 0.8]) {
+        const px = tr.a.x + ux * f;
+        const py = tr.a.y + uy * f;
+        ctx.beginPath();
+        for (let k = 0; k <= 6; k++) {
+          const d = (k / 6) * (14 - flash * 5) + tr.thickness / 2;
+          const side = (k % 2 === 0 ? -1 : 1) * 4;
+          const sx = px + nx * d * down + (ux / len) * side;
+          const sy = py + ny * d * down + (uy / len) * side;
+          if (k === 0) ctx.moveTo(sx, sy);
+          else ctx.lineTo(sx, sy);
+        }
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(tr.a.x, tr.a.y);
+      ctx.lineTo(tr.b.x, tr.b.y);
+      ctx.strokeStyle = rgba(TRAMPOLINE_COLOR, 0.18 + flash * 0.4);
+      ctx.lineWidth = tr.thickness + 14;
+      ctx.stroke();
+      ctx.strokeStyle = flash > 0.2 ? '#ffe4ea' : TRAMPOLINE_COLOR;
+      ctx.lineWidth = tr.thickness;
+      ctx.stroke();
+      ctx.strokeStyle = '#3d0b17';
+      ctx.lineWidth = tr.thickness - 6;
+      ctx.stroke();
+      ctx.strokeStyle = rgba('#ffffff', 0.35);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  private drawPendulums(top: number, bottom: number, t: number) {
+    const { ctx } = this;
+    for (const p of this.pendulums) {
+      if (p.pivotY - 30 > bottom || p.pivotY + p.length + p.bobR < top) continue;
+      const angle = pendulumAngle(p, t);
+      const bob = pendulumBob(p, angle);
+      // Swing arc.
+      ctx.strokeStyle = rgba(PENDULUM_COLOR, 0.1);
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 8]);
+      ctx.beginPath();
+      ctx.arc(p.pivotX, p.pivotY, p.length, Math.PI / 2 - p.amplitude, Math.PI / 2 + p.amplitude);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Chain.
+      ctx.strokeStyle = rgba('#e6d2ff', 0.7);
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(p.pivotX, p.pivotY);
+      ctx.lineTo(bob.x, bob.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = PENDULUM_COLOR;
+      ctx.beginPath();
+      ctx.arc(p.pivotX, p.pivotY, 6, 0, Math.PI * 2);
+      ctx.fill();
+      // Wrecking ball.
+      const glow = ctx.createRadialGradient(bob.x, bob.y, p.bobR * 0.8, bob.x, bob.y, p.bobR + 16);
+      glow.addColorStop(0, rgba(PENDULUM_COLOR, 0.35));
+      glow.addColorStop(1, rgba(PENDULUM_COLOR, 0));
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(bob.x, bob.y, p.bobR + 16, 0, Math.PI * 2);
+      ctx.fill();
+      const body = ctx.createRadialGradient(bob.x - p.bobR * 0.35, bob.y - p.bobR * 0.4, p.bobR * 0.1, bob.x, bob.y, p.bobR);
+      body.addColorStop(0, '#6b6f8f');
+      body.addColorStop(0.6, '#2a2c44');
+      body.addColorStop(1, '#101122');
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.arc(bob.x, bob.y, p.bobR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = PENDULUM_COLOR;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.arc(bob.x - p.bobR * 0.35, bob.y - p.bobR * 0.4, p.bobR * 0.16, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 

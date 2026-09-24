@@ -26,6 +26,10 @@ export interface RaceRun {
   sectionTimes: number[];
   finishOrder: string[];
   height: number;
+  /** Longest distance any marble fell without touching anything. */
+  maxFreeFall: number;
+  /** Median over marbles of each marble's longest untouched fall. */
+  medianFreeFall: number;
 }
 
 /** Runs one complete race without any graphics. */
@@ -85,6 +89,8 @@ export function runRace(seed: number, count: number, opts: { settleSteps?: numbe
     sectionTimes,
     finishOrder: sim.finishingOrder.map((m) => m.participant.id),
     height: track.height,
+    maxFreeFall: sim.stats.maxFreeFall,
+    medianFreeFall: [...sim.marbles.map((m) => m.maxFreeFall)].sort((a, b) => a - b)[Math.floor(sim.marbles.length / 2)],
   };
   sim.destroy();
   return run;

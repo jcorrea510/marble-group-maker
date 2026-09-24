@@ -316,8 +316,12 @@ export class RaceController {
     const remainingPhysics = Math.max(0.3, (total - this.expectedTime(tail)) * pace * 1.12);
     const remainingWall = TARGET_RACE_WALL_SECONDS - this.raceWall;
 
-    let desired = remainingWall > 1.2 ? remainingPhysics / remainingWall : 1.45;
-    desired = Math.min(1.45, Math.max(0.85, desired));
+    // Once most of the field is home, the last few stragglers may be shown in
+    // fast-forward (up to 2.2x) so nobody waits long for the final marble.
+    const finishedShare = this.sim.finishedCount / marbles.length;
+    const maxSpeed = finishedShare >= 0.75 ? 2.2 : 1.45;
+    let desired = remainingWall > 1.2 ? remainingPhysics / remainingWall : maxSpeed;
+    desired = Math.min(maxSpeed, Math.max(0.85, desired));
     if (this.raceWall < 1.2) desired = 1;
     this.speed += (desired - this.speed) * Math.min(1, dt * 0.9);
   }
@@ -405,6 +409,15 @@ export class RaceController {
           p.sparks(e.x, e.y, '#ffd08a', 6, 260);
           cam.addShake(0.07);
           audio.hit(e.strength, 'bumper');
+        } else if (e.kind === 'trampoline') {
+          p.ring(e.x, e.y, '#fb7185', 12);
+          p.sparks(e.x, e.y, '#ffc2cc', 5, 240);
+          cam.addShake(0.05);
+          audio.hit(e.strength, 'bumper');
+        } else if (e.kind === 'pendulum') {
+          p.sparks(e.x, e.y, '#ff9cf0', 6, 220);
+          cam.addShake(0.08);
+          audio.hit(e.strength, 'other');
         } else if (e.kind === 'marble') {
           if (e.strength > 4) p.sparks(e.x, e.y, '#ffffff', Math.min(6, Math.floor(e.strength / 1.5)), 170);
           if (e.strength > 9) cam.addShake(0.04);

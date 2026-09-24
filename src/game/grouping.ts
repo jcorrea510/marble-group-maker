@@ -81,3 +81,34 @@ export function validateSetup(
     };
   return { ok: true, message: '' };
 }
+
+/** How the teacher sizes groups: a number of groups, or people per group. */
+export type GroupMode = 'groups' | 'size';
+
+/**
+ * Number of groups for `total` people. In "size" mode, groups hold at most
+ * `value` people (10 people, 4 per group -> 3 groups of 4, 3, 3).
+ */
+export function groupCountFor(total: number, mode: GroupMode, value: number): number {
+  if (mode === 'groups') return value;
+  if (!Number.isFinite(value) || value < 1 || total < 1) return 0;
+  return Math.max(1, Math.ceil(total / Math.floor(value)));
+}
+
+/** Validates a setup in either mode, with a message that fits the mode. */
+export function validateGroupSetup(
+  participantCount: number,
+  mode: GroupMode,
+  value: number,
+  limits: { min: number; max: number },
+): SetupValidation {
+  if (mode === 'size') {
+    const base = validateSetup(participantCount, 1, limits);
+    if (!base.ok) return base;
+    if (!Number.isInteger(value) || value < 1) return { ok: false, message: 'Choose at least 1 person per group.' };
+    if (value > participantCount)
+      return { ok: false, message: `There are only ${participantCount} people – choose ${participantCount} or fewer per group.` };
+    return { ok: true, message: '' };
+  }
+  return validateSetup(participantCount, value, limits);
+}

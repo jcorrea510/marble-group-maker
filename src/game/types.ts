@@ -26,6 +26,8 @@ export interface RaceResult {
   seed: number;
   courseCode: string;
   groupCount: number;
+  /** Name of the saved class (period) that raced, if any. */
+  className?: string;
   order: FinishEntry[];
   durationMs: number;
   finishedAt: number;
