@@ -3,6 +3,7 @@ import { generateTrack, generateTrackWithInfo } from '../../src/game/track/gener
 import { validateTrack } from '../../src/game/track/validate';
 import { DESIGN_DIAMETER, SAFE_GAP } from '../../src/game/track/constants';
 import { itemGap } from '../../src/game/track/geometry';
+import { runRace } from '../sim/helpers';
 
 const COUNTS = [2, 4, 8, 10, 16, 24, 33, 50];
 
@@ -47,7 +48,7 @@ describe('track generator', () => {
       expect(types[types.length - 1]).toBe('finish');
       expect(types).toContain('split');
       expect(types.some((x) => x === 'zigzag' || x === 'mud')).toBe(true);
-      expect(t.items.some((i) => i.kind === 'spinner' || i.kind === 'slider')).toBe(true);
+      expect(t.items.some((i) => i.kind === 'spinner' || i.kind === 'slider' || i.kind === 'pendulum')).toBe(true);
     }
   });
 
@@ -83,5 +84,48 @@ describe('track generator', () => {
     expect(t.finishY).toBeGreaterThan(t.gateY);
     expect(t.finishY).toBeLessThan(t.height);
     expect(t.finishX2 - t.finishX1).toBeGreaterThan(DESIGN_DIAMETER * 3);
+  });
+});
+
+describe('course coverage', () => {
+  it('uses the new section types across many courses', () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 80; seed++) for (const s of generateTrack(seed * 104729, 12).sections) seen.add(s.type);
+    for (const type of ['pendulums', 'cascade', 'trampolines', 'spinners', 'sliders']) expect(seen).toContain(type);
+  });
+
+  it('never leaves marbles a long real free-fall in full races', () => {
+    for (const [seed, n] of [
+      [9001, 8],
+      [9002, 20],
+      [9003, 40],
+    ]) {
+      const run = runRace(seed, n);
+      expect(run.timedOut).toBe(false);
+      expect(run.maxFreeFall).toBeLessThan(1100);
+      expect(run.medianFreeFall).toBeLessThan(450);
+    }
+  });
+});
+
+describe('split lanes', () => {
+  it('always contain the moving obstacles their label promises', () => {
+    const kindFor: Record<string, string> = { Spinners: 'spinner', Shuttles: 'slider', 'Wrecking balls': 'pendulum' };
+    for (let seed = 1; seed <= 120; seed++) {
+      const t = generateTrack(seed, 12);
+      for (const s of t.sections) {
+        for (const lane of s.lanes ?? []) {
+          const kind = kindFor[lane.label];
+          if (!kind) continue;
+          const found = t.items.some((it) => {
+            if (it.kind !== kind) return false;
+            const x = it.kind === 'pendulum' ? it.pivotX : (it as { x: number }).x;
+            const y = it.kind === 'pendulum' ? it.pivotY : (it as { y: number }).y;
+            return x > lane.xl && x < lane.xr && y > s.y0 && y < s.y1;
+          });
+          expect(found, `seed ${seed}: ${lane.label} lane is empty`).toBe(true);
+        }
+      }
+    }
   });
 });

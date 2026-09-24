@@ -21,6 +21,12 @@ export interface RaceConfig {
   groupCount: number;
 }
 
+/** Testing aid: `?seed=123` replays a specific course. */
+function debugSeed(): number | null {
+  const value = Number(new URLSearchParams(window.location.search).get('seed'));
+  return Number.isInteger(value) && value > 0 ? value >>> 0 : null;
+}
+
 export default function App() {
   const [initial] = useState(loadState);
   const [participants, setParticipants] = useState<Participant[]>(initial.participants);
@@ -58,7 +64,7 @@ export default function App() {
     (startOrder: Participant[], groups: number) => {
       const raceNumber = raceCount + 1;
       setRaceCount(raceNumber);
-      setRace({ raceNumber, seed: randomSeed(), startOrder, groupCount: groups });
+      setRace({ raceNumber, seed: debugSeed() ?? randomSeed(), startOrder, groupCount: groups });
       setScreen('race');
       audio.unlock();
     },

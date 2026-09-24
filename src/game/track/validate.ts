@@ -41,7 +41,7 @@ export function validateTrack(track: Track): ValidationResult {
   }
 
   for (const item of solid) {
-    if (item.kind === 'wall' && (item.style === 'ramp' || item.style === 'funnel' || item.style === 'deflector')) {
+    if (item.kind === 'wall' && ['ramp', 'funnel', 'deflector', 'plate', 'trampoline'].includes(item.style)) {
       const dx = Math.abs(item.b.x - item.a.x);
       const dy = Math.abs(item.b.y - item.a.y);
       const slope = (Math.atan2(dy, dx) * 180) / Math.PI;
@@ -74,7 +74,8 @@ function checkAgainstOuter(a: TrackItem, b: TrackItem, track: Track, problems: s
   if (isMoving(other) && gap < SAFE_GAP_MOVING) {
     problems.push(`Moving item ${other.id} too close to the outer wall (${gap.toFixed(1)})`);
   } else if (other.kind === 'peg' || other.kind === 'bumper') {
-    if (gap < SAFE_GAP) problems.push(`Item ${other.id} too close to the outer wall (${gap.toFixed(1)})`);
+    // Either a bump set into the wall, or a free obstacle with room to pass.
+    if (gap > -2 && gap < SAFE_GAP) problems.push(`Item ${other.id} too close to the outer wall (${gap.toFixed(1)})`);
   } else if (other.kind === 'wall' && gap > 0 && gap < SAFE_GAP) {
     problems.push(`Wall ${other.id} leaves a tight gap at the outer wall (${gap.toFixed(1)})`);
   }
@@ -93,5 +94,14 @@ function checkPair(a: TrackItem, b: TrackItem, problems: string[]) {
     if (gap > 0.5 && gap < SAFE_GAP) problems.push(`Walls ${a.id}/${b.id} leave a tight gap (${gap.toFixed(1)})`);
     return;
   }
-  if (gap < SAFE_GAP) problems.push(`Items ${a.id}/${b.id} too close (${gap.toFixed(1)})`);
+  // A round bump set into a vertical divider is allowed (like on the outer walls).
+  const bumpInWall =
+    gap <= -2 &&
+    ((isVerticalWall(a) && (b.kind === 'peg' || b.kind === 'bumper')) ||
+      (isVerticalWall(b) && (a.kind === 'peg' || a.kind === 'bumper')));
+  if (gap < SAFE_GAP && !bumpInWall) problems.push(`Items ${a.id}/${b.id} too close (${gap.toFixed(1)})`);
+}
+
+function isVerticalWall(item: TrackItem): boolean {
+  return item.kind === 'wall' && (item.style === 'wall' || item.style === 'divider') && Math.abs(item.a.x - item.b.x) < 1;
 }

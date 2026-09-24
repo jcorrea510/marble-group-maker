@@ -9,9 +9,11 @@ import {
   TRACK_WIDTH,
   marbleRadiusFor,
 } from './constants';
-import { clamp, deg, isMoving, itemGap, itemYRange } from './geometry';
+import { CoverageMap } from './coverage';
+import { clamp, deg, isMoving, itemGap, itemYRange, shapeGap, shapesOf, type Shape } from './geometry';
 import type {
   BumperItem,
+  PendulumItem,
   PegItem,
   ProgressModel,
   Ramp,
@@ -48,7 +50,7 @@ import { validateTrack } from './validate';
  */
 
 /** Target duration (in seconds of physics time) for a typical marble. */
-export const TARGET_RACE_SECONDS = 15.8;
+export const TARGET_RACE_SECONDS = 14.4;
 
 interface Flow {
   x: number;
@@ -78,7 +80,7 @@ interface Built {
   lanes?: Section['lanes'];
 }
 
-type LaneType = 'zigzag' | 'pegs' | 'bumpers' | 'spinners' | 'sliders' | 'drop';
+type LaneType = 'zigzag' | 'pegs' | 'bumpers' | 'spinners' | 'sliders' | 'pendulums' | 'cascade' | 'trampolines' | 'drop';
 
 const LABELS: Record<SectionType, string[]> = {
   start: ['Starting Gate'],
@@ -88,7 +90,10 @@ const LABELS: Record<SectionType, string[]> = {
   funnel: ['The Funnel', 'Bottleneck', 'Squeeze Point'],
   bumpers: ['Bumper Bash', 'Pinball Alley', 'Boing Zone'],
   spinners: ['Spin Cycle', 'Windmills', 'Paddle Wheels'],
-  sliders: ['Shuttle Bars', 'Sliding Doors', 'Moving Walkway'],
+  sliders: ['Sliding Doors', 'Shuttle Gates', 'Moving Walkway'],
+  pendulums: ['Wrecking Balls', 'Swing Time', 'Pendulum Alley'],
+  cascade: ['Waterfall', 'Cascade', 'Rapids'],
+  trampolines: ['Trampoline Park', 'Boing Boards', 'Springboards'],
   drop: ['Free Fall', 'The Plunge', 'Cliff Drop'],
   split: ['The Split', 'Fork in the Road', 'Choose a Side'],
   finish: ['Final Funnel'],
@@ -100,6 +105,9 @@ const LANE_LABELS: Record<LaneType, string> = {
   bumpers: 'Bumpers',
   spinners: 'Spinners',
   sliders: 'Shuttles',
+  pendulums: 'Wrecking balls',
+  cascade: 'Waterfall',
+  trampolines: 'Trampolines',
   drop: 'Plunge',
 };
 
@@ -123,15 +131,71 @@ class Builder {
     return this.idCounter++;
   }
 
+  // Spatial index: items bucketed by height so safety checks only look at
+  // nearby obstacles (a course has several hundred of them).
+  private static readonly BUCKET = 250;
+  private buckets = new Map<number, TrackItem[]>();
+  private tallItems: TrackItem[] = [];
+  private yRanges = new Map<number, [number, number]>();
+  private shapeCache = new Map<number, Shape[]>();
+  private visitStamp = new Map<number, number>();
+  private stamp = 0;
+
+  private push(item: TrackItem) {
+    this.items.push(item);
+    if (item.kind === 'zone') return;
+    const range = itemYRange(item);
+    this.yRanges.set(item.id, range);
+    this.shapeCache.set(item.id, shapesOf(item));
+    if (range[1] - range[0] > 4000) {
+      this.tallItems.push(item);
+      return;
+    }
+    for (let k = Math.floor(range[0] / Builder.BUCKET); k <= Math.floor(range[1] / Builder.BUCKET); k++) {
+      let list = this.buckets.get(k);
+      if (!list) this.buckets.set(k, (list = []));
+      list.push(item);
+    }
+  }
+
+  private nearby(top: number, bottom: number): TrackItem[] {
+    const out = this.tallItems.slice();
+    const stamp = ++this.stamp;
+    for (let k = Math.floor(top / Builder.BUCKET); k <= Math.floor(bottom / Builder.BUCKET); k++) {
+      for (const item of this.buckets.get(k) ?? []) {
+        if (this.visitStamp.get(item.id) === stamp) continue;
+        this.visitStamp.set(item.id, stamp);
+        out.push(item);
+      }
+    }
+    return out;
+  }
+
+  private gapBetween(shapes: Shape[], other: TrackItem): number {
+    let best = Infinity;
+    for (const s1 of shapes) for (const s2 of this.shapeCache.get(other.id)!) best = Math.min(best, shapeGap(s1, s2));
+    return best;
+  }
+
+  /** Takes an item back out (used when a station doesn't fit after all). */
+  remove(item: TrackItem) {
+    this.items = this.items.filter((i) => i !== item);
+    this.tallItems = this.tallItems.filter((i) => i !== item);
+    for (const list of this.buckets.values()) {
+      const idx = list.indexOf(item);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+  }
+
   wall(a: Vec, b: Vec, thickness: number, style: WallStyle, optional = false): WallItem {
     const item: WallItem = { kind: 'wall', id: this.id(), a, b, thickness, style, optional };
-    this.items.push(item);
+    this.push(item);
     return item;
   }
 
   zone(polygon: Vec[], drag: number): ZoneItem {
     const item: ZoneItem = { kind: 'zone', id: this.id(), zone: 'mud', polygon, drag };
-    this.items.push(item);
+    this.push(item);
     return item;
   }
 
@@ -142,18 +206,18 @@ class Builder {
    */
   tryAdd(item: TrackItem, opts: { ignore?: number[]; minGap?: number } = {}): boolean {
     const [top, bottom] = itemYRange(item);
-    for (const other of this.items) {
-      if (other.kind === 'zone') continue;
+    const shapes = shapesOf(item);
+    for (const other of this.nearby(top - 200, bottom + 200)) {
       if (opts.ignore?.includes(other.id)) continue;
-      const [oTop, oBottom] = itemYRange(other);
+      const [oTop, oBottom] = this.yRanges.get(other.id)!;
       if (oBottom < top - 200 || oTop > bottom + 200) continue;
       const required = Math.max(
         isMoving(item) || isMoving(other) ? SAFE_GAP_MOVING : SAFE_GAP,
         opts.minGap ?? 0,
       );
-      if (itemGap(item, other) < required) return false;
+      if (this.gapBetween(shapes, other) < required) return false;
     }
-    this.items.push(item);
+    this.push(item);
     return true;
   }
 
@@ -174,6 +238,46 @@ class Builder {
     const item: WallItem = { kind: 'wall', id: this.id(), a, b, thickness: 14, style: 'deflector', optional: true };
     const attachedTo = side === 'L' ? region.leftWallId : region.rightWallId;
     return this.tryAdd(item, { ignore: [attachedTo] });
+  }
+
+  /**
+   * A half-round bump sticking out of a vertical wall (side wall or divider).
+   * Marbles sliding down the wall get knocked back into play; nothing can
+   * rest on it because it only ever pushes away from the wall.
+   */
+  wallBump(region: Region, side: 'L' | 'R', y: number, r: number): boolean {
+    const wallX = side === 'L' ? region.xl : region.xr;
+    const x = wallX + (side === 'L' ? -r * 0.25 : r * 0.25);
+    const attachedTo = side === 'L' ? region.leftWallId : region.rightWallId;
+    return this.tryAdd(this.peg(x, y, r), { ignore: [attachedTo] });
+  }
+
+  /**
+   * Something sticking `reach` units out of a vertical wall at height y:
+   * a round bump for short reaches, a slanted deflector for longer ones.
+   */
+  wallFiller(region: Region, side: 'L' | 'R', y: number, reach: number): boolean {
+    if (!Number.isFinite(reach) || reach < 6) return false;
+    if (reach <= 17) return this.wallBump(region, side, y, Math.max(8, reach / 0.75));
+    const angle = 32;
+    const length = reach / Math.cos(deg(angle));
+    const dy = Math.sin(deg(angle)) * length;
+    return this.deflector(region, side, y - dy / 2, length, angle);
+  }
+
+  /** A short slanted plate floating in open space. */
+  plate(cx: number, cy: number, length: number, angleDeg: number, thickness = 12): WallItem {
+    const dx = (Math.cos(deg(angleDeg)) * length) / 2;
+    const dy = (Math.sin(deg(angleDeg)) * length) / 2;
+    return {
+      kind: 'wall',
+      id: this.id(),
+      a: { x: cx - dx, y: cy - dy },
+      b: { x: cx + dx, y: cy + dy },
+      thickness,
+      style: 'plate',
+      optional: true,
+    };
   }
 
   /** Scatter a few small pegs in the free space of a section. */
@@ -331,7 +435,7 @@ function buildZigzag(b: Builder, region: Region, opts: ZigzagOptions = {}): Buil
   const exitX = lastLowX < (region.xl + region.xr) / 2 ? region.xl + gap / 2 : region.xr - gap / 2;
 
   // Rough timing model (seconds): rolling time grows with ramp length.
-  const estimate = ramps.reduce((s, r) => s + 0.39 + Math.abs(r.b.x - r.a.x) / 605, 0) * (opts.mud ? 1.55 : 1);
+  const estimate = ramps.reduce((s, r) => s + 0.5 + Math.abs(r.b.x - r.a.x) / 473, 0) * (opts.mud ? 1.21 : 1);
 
   return {
     type: opts.mud ? 'mud' : 'zigzag',
@@ -347,23 +451,30 @@ function buildZigzag(b: Builder, region: Region, opts: ZigzagOptions = {}): Buil
 function buildPegs(b: Builder, region: Region, forcedHeight?: number): Built {
   const { rng } = b;
   const h = forcedHeight ?? rng.range(420, 580);
-  const colGap = rng.range(3.2, 3.9) * D;
-  const rowGap = rng.range(2.3, 2.8) * D;
-  const pegR = rng.range(6, 8.5);
+  const pegR = rng.range(6.5, 8.5);
+  // Spacing chosen so two staggered rows cover every column: a marble can't
+  // drop straight through the field, but there is always room to pass.
+  const reach = pegR + b.radius;
+  const colGap = Math.max(2 * pegR + SAFE_GAP + 4, rng.range(3.3, 3.75) * reach);
+  const rowGap = rng.range(2.2, 2.6) * D;
   const shift = rng.range(0, colGap);
   const top = region.y0 + 60;
   const bottom = region.y0 + h - 45;
   let row = 0;
   for (let y = top; y <= bottom; y += rowGap, row++) {
     const start = region.xl + ((shift + ((row % 2) * colGap) / 2) % colGap);
+    let firstEdge = Infinity; // free space between the left wall and this row's first peg
+    let lastEdge = Infinity; // ...and between the last peg and the right wall
     for (let x = start; x < region.xr; x += colGap) {
-      if (rng.chance(0.1)) continue;
       const item = rng.chance(0.07) ? b.bumper(x, y, 12, 1.0) : b.peg(x, y, pegR);
-      b.tryAdd(item);
+      if (!b.tryAdd(item)) continue;
+      firstEdge = Math.min(firstEdge, x - item.r - region.xl);
+      lastEdge = Math.min(lastEdge, region.xr - x - item.r);
     }
-    if (row % 2 === 1 && rng.chance(0.55)) {
-      b.deflector(region, rng.chance(0.5) ? 'L' : 'R', y + rowGap * 0.3, rng.range(40, 60), rng.range(35, 45));
-    }
+    // Fill the space next to each wall as far as the safety gap allows, so the
+    // staggered rows cover each other and nothing slides down the edge.
+    b.wallFiller(region, 'L', y, firstEdge - SAFE_GAP - 2);
+    b.wallFiller(region, 'R', y, lastEdge - SAFE_GAP - 2);
   }
   return {
     type: 'pegs',
@@ -371,7 +482,7 @@ function buildPegs(b: Builder, region: Region, forcedHeight?: number): Built {
     height: h,
     progress: { kind: 'vertical' },
     exit: { x: (region.xl + region.xr) / 2, spread: (region.xr - region.xl) / 2 },
-    estimate: h / 495,
+    estimate: h / 280,
     weight: h,
   };
 }
@@ -400,88 +511,242 @@ function buildBumpers(b: Builder, region: Region, forcedHeight?: number): Built 
     height: h,
     progress: { kind: 'vertical' },
     exit: { x: (region.xl + region.xr) / 2, spread: (region.xr - region.xl) / 2 },
-    estimate: h / 475,
+    estimate: h / 247,
     weight: h,
   };
 }
 
-function buildSpinners(b: Builder, region: Region, forcedHeight?: number): Built {
+type Mover = 'spinner' | 'slider' | 'pendulum';
+
+/**
+ * A "station": a full-width funnel shelf with one or two openings, and a
+ * moving obstacle right under each opening. Every marble lands on the shelf,
+ * drops through an opening and has to get past the spinner / shuttle /
+ * wrecking ball below – nobody slips through untouched.
+ * Returns the y where the station ends, or null if it didn't fit.
+ */
+function buildStation(
+  b: Builder,
+  region: Region,
+  y0: number,
+  mover: Mover,
+  maxBottom: number,
+  avoid: number[],
+): { end: number; centers: number[] } | null {
   const { rng } = b;
-  const h = forcedHeight ?? rng.range(440, 580);
-  const target = region.lane ? rng.int(1, 2) : rng.int(2, 3);
-  let placed = 0;
-  for (let attempt = 0; attempt < 300 && placed < target; attempt++) {
-    const armLength = rng.range(region.lane ? 65 : 85, region.lane ? 105 : 145);
-    const xMin = region.xl + armLength + 2 * D;
-    const xMax = region.xr - armLength - 2 * D;
-    const yMin = region.y0 + armLength + 60;
-    const yMax = region.y0 + h - armLength - 40;
-    if (xMax <= xMin || yMax <= yMin) continue;
-    const spinner: SpinnerItem = {
-      kind: 'spinner',
-      id: b.id(),
-      x: rng.range(xMin, xMax),
-      y: rng.range(yMin, yMax),
-      armLength,
-      armThickness: 14,
-      arms: rng.pick([2, 3, 4] as const),
-      speed: rng.sign() * rng.range(1.4, 2.6),
-      phase: rng.range(0, Math.PI * 2),
-    };
-    if (b.tryAdd(spinner)) placed++;
+  const W = region.xr - region.xl;
+  const w = clamp(D * (3.4 + b.count / 16), 3.4 * D, 5 * D);
+  // Openings never line up with the ones above, so no marble can drop
+  // straight through two stations in a row.
+  let openings = 1;
+  let centers: number[] = [];
+  for (let attempt = 0; attempt < 12; attempt++) {
+    openings = region.lane || W < 700 ? 1 : rng.chance(0.6) ? 2 : 1;
+    centers =
+      openings === 1
+        ? [(region.xl + region.xr) / 2 + rng.range(-0.2, 0.2) * W]
+        : [region.xl + W * rng.range(0.26, 0.32), region.xr - W * rng.range(0.26, 0.32)];
+    if (centers.every((c) => avoid.every((a) => Math.abs(c - a) > w * 1.3))) break;
   }
-  b.sprinklePegs(region, region.y0 + 50, region.y0 + h - 40, region.lane ? 2 : rng.int(3, 7));
-  b.deflector(region, rng.chance(0.5) ? 'L' : 'R', region.y0 + h * rng.range(0.3, 0.7), 50, 40);
+  const slope = deg(rng.range(30, 34));
+  const extent = Math.max(centers[0] - w / 2 - region.xl, region.xr - (centers[centers.length - 1] + w / 2));
+  let H = Math.tan(slope) * extent;
+  let rise = 0;
+  let inner = 0;
+  if (openings === 2) {
+    inner = centers[1] - w / 2 - (centers[0] + w / 2);
+    rise = Math.tan(deg(34)) * (inner / 2);
+    H = Math.max(H, rise + 25);
+  }
+  const top = y0 + 30;
+  const bottom = top + H;
+
+  // Movers under each opening (sized to fit; shrunk if they don't).
+  const movers: TrackItem[] = [];
+  for (const c of centers) {
+    // Horizontal room around the opening, keeping clear of walls and dividers.
+    const room = Math.min(c - region.xl, region.xr - c) - SAFE_GAP_MOVING - 12;
+    let item: TrackItem | null = null;
+    for (let attempt = 0; attempt < 6 && !item; attempt++) {
+      const shrink = 1 - attempt * 0.12;
+      let candidate: TrackItem;
+      if (mover === 'spinner') {
+        const L = Math.min(rng.range(78, region.lane ? 100 : 118) * shrink, room - 8);
+        candidate = {
+          kind: 'spinner',
+          id: b.id(),
+          x: c,
+          y: bottom + L + 7 + SAFE_GAP_MOVING + 18 + attempt * 6,
+          armLength: L,
+          armThickness: 14,
+          arms: rng.pick([2, 3, 4] as const),
+          speed: rng.sign() * rng.range(1.5, 2.6),
+          phase: rng.range(0, Math.PI * 2),
+        } satisfies SpinnerItem;
+      } else if (mover === 'slider') {
+        const angle = rng.sign() * deg(rng.range(12, 20));
+        // Bar + travel must fit in the room available.
+        const amplitude = Math.min(w * rng.range(0.55, 0.95) * shrink, room * 0.45);
+        const length = Math.min(w * rng.range(1.25, 1.7), ((room - amplitude) * 2) / Math.cos(angle));
+        candidate = {
+          kind: 'slider',
+          id: b.id(),
+          x: c,
+          y: bottom + SAFE_GAP_MOVING + 30 + (Math.abs(Math.sin(angle)) * length) / 2,
+          length,
+          thickness: 16,
+          angle,
+          amplitude,
+          period: rng.range(1.8, 3),
+          phase: rng.range(0, Math.PI * 2),
+        } satisfies SliderItem;
+      } else {
+        const swing = deg(rng.range(42, 58) * shrink);
+        const length = Math.min(rng.range(90, 125), (room - 24) / Math.sin(swing));
+        candidate = {
+          kind: 'pendulum',
+          id: b.id(),
+          pivotX: c,
+          pivotY: bottom + 36 + attempt * 8,
+          length,
+          bobR: rng.range(18, 23),
+          amplitude: swing,
+          period: rng.range(1.6, 2.4),
+          phase: rng.range(0, Math.PI * 2),
+        } satisfies PendulumItem;
+      }
+      if (itemYRange(candidate)[1] + SAFE_GAP_MOVING + 10 > maxBottom) continue;
+      // The shelf isn't placed yet, so check the mover against it separately.
+      const shelfGap = Math.min(...shelfWalls().map((wall) => gapToWall(candidate, wall)));
+      if (shelfGap < SAFE_GAP_MOVING) continue;
+      if (b.tryAdd(candidate)) item = candidate;
+    }
+    if (!item) {
+      for (const m of movers) b.remove(m);
+      return null;
+    }
+    movers.push(item);
+  }
+
+  function shelfWalls(): [Vec, Vec, number][] {
+    const T = 18;
+    const walls: [Vec, Vec, number][] = [
+      [{ x: region.xl - 6, y: top }, { x: centers[0] - w / 2, y: bottom }, T],
+      [{ x: region.xr + 6, y: top }, { x: centers[centers.length - 1] + w / 2, y: bottom }, T],
+    ];
+    if (openings === 2) {
+      const px = (centers[0] + w / 2 + centers[1] - w / 2) / 2;
+      walls.push([{ x: centers[0] + w / 2, y: bottom }, { x: px, y: bottom - rise }, T]);
+      walls.push([{ x: px, y: bottom - rise }, { x: centers[1] - w / 2, y: bottom }, T]);
+    }
+    return walls;
+  }
+  for (const [a, c, t] of shelfWalls()) b.wall(a, c, t, 'funnel');
+
+  const moverBottom = Math.max(...movers.map((m) => itemYRange(m)[1]));
+  return { end: moverBottom + SAFE_GAP_MOVING + 12, centers };
+}
+
+function gapToWall(item: TrackItem, [a, c, t]: [Vec, Vec, number]): number {
+  const wall: WallItem = { kind: 'wall', id: -1, a, b: c, thickness: t, style: 'funnel' };
+  return itemGap(item, wall);
+}
+
+const MOVER_SECTION: Record<Mover, SectionType> = { spinner: 'spinners', slider: 'sliders', pendulum: 'pendulums' };
+
+function buildStations(b: Builder, region: Region, mover: Mover, forcedHeight?: number): Built {
+  const { rng } = b;
+  const wanted = forcedHeight !== undefined ? 3 : rng.int(1, 2);
+  const limit = forcedHeight !== undefined ? region.y0 + forcedHeight - 20 : region.y0 + 2000;
+  let y = region.y0;
+  let stations = 0;
+  let avoid = region.flow.spread < (region.xr - region.xl) * 0.3 ? [region.flow.x] : [];
+  for (let i = 0; i < wanted; i++) {
+    // A few layouts are tried before giving up on another station.
+    let station: { end: number; centers: number[] } | null = null;
+    for (let attempt = 0; attempt < 4 && !station; attempt++) station = buildStation(b, region, y, mover, limit, avoid);
+    if (station === null) break;
+    y = station.end;
+    avoid = station.centers;
+    stations++;
+  }
+  const type = MOVER_SECTION[mover];
+  const height = forcedHeight ?? Math.max(y - region.y0 + 20, 200);
+  if (stations === 0 && forcedHeight === undefined) {
+    // Extremely unlikely; fall back to a peg field so the course stays complete.
+    return buildPegs(b, region);
+  }
   return {
-    type: 'spinners',
-    label: rng.pick(LABELS.spinners),
+    type,
+    label: rng.pick(LABELS[type]),
+    height,
+    progress: { kind: 'vertical' },
+    exit: { x: (region.xl + region.xr) / 2, spread: (region.xr - region.xl) / 2 },
+    estimate: 0.45 + stations * 1.6,
+    weight: height,
+  };
+}
+
+/** Waterfall: a staggered wall of short slanted plates marbles tumble down. */
+function buildCascade(b: Builder, region: Region, forcedHeight?: number): Built {
+  const { rng } = b;
+  const h = forcedHeight ?? rng.range(400, 520);
+  const colGap = rng.range(region.lane ? 150 : 170, region.lane ? 185 : 215);
+  const rowGap = rng.range(88, 108);
+  const length = rng.range(100, 135);
+  const pattern = rng.pick(['alternate', 'rows', 'random'] as const);
+  const shift = rng.range(0, colGap);
+  let row = 0;
+  for (let y = region.y0 + 60; y <= region.y0 + h - 60; y += rowGap, row++) {
+    const start = region.xl + ((shift + ((row % 2) * colGap) / 2) % colGap);
+    let col = 0;
+    let firstEdge = Infinity;
+    let lastEdge = Infinity;
+    for (let x = start; x < region.xr; x += colGap, col++) {
+      const sign =
+        pattern === 'alternate' ? (col % 2 === 0 ? 1 : -1) : pattern === 'rows' ? (row % 2 === 0 ? 1 : -1) : rng.sign();
+      const plate = b.plate(x, y, length * rng.range(0.9, 1.1), sign * rng.range(22, 30));
+      if (!b.tryAdd(plate)) continue;
+      const minX = Math.min(plate.a.x, plate.b.x) - plate.thickness / 2;
+      const maxX = Math.max(plate.a.x, plate.b.x) + plate.thickness / 2;
+      firstEdge = Math.min(firstEdge, minX - region.xl);
+      lastEdge = Math.min(lastEdge, region.xr - maxX);
+    }
+    b.wallFiller(region, 'L', y, firstEdge - SAFE_GAP - 2);
+    b.wallFiller(region, 'R', y, lastEdge - SAFE_GAP - 2);
+  }
+  return {
+    type: 'cascade',
+    label: rng.pick(LABELS.cascade),
     height: h,
     progress: { kind: 'vertical' },
     exit: { x: (region.xl + region.xr) / 2, spread: (region.xr - region.xl) / 2 },
-    estimate: h / 900,
+    estimate: h / 207,
     weight: h,
   };
 }
 
-function buildSliders(b: Builder, region: Region, forcedHeight?: number): Built {
+/** Trampoline park: springy slanted bars that launch marbles around. */
+function buildTrampolines(b: Builder, region: Region, forcedHeight?: number): Built {
   const { rng } = b;
-  const width = region.xr - region.xl;
-  const levels = region.lane ? rng.int(1, 2) : rng.int(2, 3);
-  const h = forcedHeight ?? levels * rng.range(165, 200) + 90;
-  const spacing = (h - 110) / levels;
-  for (let i = 0; i < levels; i++) {
-    const y = region.y0 + 80 + spacing * (i + 0.5);
-    const angle = rng.sign() * deg(rng.range(11, 19));
-    let length = rng.range(region.lane ? 110 : 170, region.lane ? 170 : 270);
-    let halfW = (Math.cos(angle) * length) / 2;
-    let maxAmp = width / 2 - halfW - SAFE_GAP_MOVING - 12;
-    if (maxAmp < 60) {
-      length = Math.max(90, (width / 2 - SAFE_GAP_MOVING - 72) * 2);
-      halfW = (Math.cos(angle) * length) / 2;
-      maxAmp = width / 2 - halfW - SAFE_GAP_MOVING - 12;
-    }
-    const slider: SliderItem = {
-      kind: 'slider',
-      id: b.id(),
-      x: (region.xl + region.xr) / 2,
-      y,
-      length,
-      thickness: 16,
-      angle,
-      amplitude: rng.range(0.55, 0.95) * maxAmp,
-      period: rng.range(2.2, 3.6),
-      phase: rng.range(0, Math.PI * 2),
-    };
-    b.tryAdd(slider);
+  const h = forcedHeight ?? rng.range(400, 520);
+  const target = region.lane ? rng.int(2, 3) : rng.int(4, 5);
+  let placed = 0;
+  for (let attempt = 0; attempt < 300 && placed < target; attempt++) {
+    const length = rng.range(region.lane ? 80 : 95, region.lane ? 115 : 145);
+    const x = rng.range(region.xl + length / 2 + 50, region.xr - length / 2 - 50);
+    const y = rng.range(region.y0 + 90, region.y0 + h - 70);
+    const bar = b.plate(x, y, length, rng.sign() * rng.range(16, 28), 14);
+    bar.style = 'trampoline';
+    if (b.tryAdd(bar, { minGap: 1.7 * D })) placed++;
   }
-  b.sprinklePegs(region, region.y0 + 40, region.y0 + h - 30, region.lane ? 2 : rng.int(3, 6));
   return {
-    type: 'sliders',
-    label: rng.pick(LABELS.sliders),
+    type: 'trampolines',
+    label: rng.pick(LABELS.trampolines),
     height: h,
     progress: { kind: 'vertical' },
-    exit: { x: (region.xl + region.xr) / 2, spread: width / 2 },
-    estimate: h / 785,
+    exit: { x: (region.xl + region.xr) / 2, spread: (region.xr - region.xl) / 2 },
+    estimate: h / 190,
     weight: h,
   };
 }
@@ -505,7 +770,7 @@ function buildDrop(b: Builder, region: Region, forcedHeight?: number): Built {
     height: h,
     progress: { kind: 'vertical' },
     exit: { x: (region.xl + region.xr) / 2, spread: width / 2 },
-    estimate: h / 810,
+    estimate: h / 255,
     weight: h,
   };
 }
@@ -534,7 +799,7 @@ function buildFunnel(b: Builder, region: Region): Built {
       height: 24 + h + 90,
       progress: { kind: 'vertical' },
       exit: { x: c, spread: w / 2 },
-      estimate: 0.28 + (24 + h) / 960,
+      estimate: 0.65 + (24 + h) / 412,
       weight: h + 90,
     };
   }
@@ -558,7 +823,7 @@ function buildFunnel(b: Builder, region: Region): Built {
     height: 24 + h + 90,
     progress: { kind: 'vertical' },
     exit: { x: (c1 + c2) / 2, spread: (c2 - c1) / 2 + w / 2 },
-    estimate: 0.26 + (24 + h) / 960,
+    estimate: 0.6 + (24 + h) / 412,
     weight: h + 90,
   };
 }
@@ -572,9 +837,15 @@ function buildLane(b: Builder, type: LaneType, region: Region, h: number): Built
     case 'bumpers':
       return buildBumpers(b, region, h);
     case 'spinners':
-      return buildSpinners(b, region, h);
+      return buildStations(b, region, 'spinner', h);
     case 'sliders':
-      return buildSliders(b, region, h);
+      return buildStations(b, region, 'slider', h);
+    case 'pendulums':
+      return buildStations(b, region, 'pendulum', h);
+    case 'cascade':
+      return buildCascade(b, region, h);
+    case 'trampolines':
+      return buildTrampolines(b, region, h);
     case 'drop':
       return buildDrop(b, region, h);
   }
@@ -593,7 +864,16 @@ function buildSplit(b: Builder, region: Region): Built {
 
   const laneTop = region.y0 + 160;
   const laneH = H - 160;
-  const types: LaneType[] = rng.shuffle(['zigzag', 'pegs', 'bumpers', 'spinners', 'sliders', 'drop'] as LaneType[]);
+  const types: LaneType[] = rng.shuffle([
+    'zigzag',
+    'pegs',
+    'bumpers',
+    'spinners',
+    'sliders',
+    'pendulums',
+    'cascade',
+    'trampolines',
+  ] as LaneType[]);
   // Make one lane "busy" (ramps / spinners) more often than not, for contrast.
   const [leftType, rightType] = types;
 
@@ -624,7 +904,7 @@ function buildSplit(b: Builder, region: Region): Built {
     height: H + 30,
     progress: { kind: 'split', splitY: laneTop, dividerX: cx, left: left.progress, right: right.progress },
     exit: { x: TRACK_WIDTH / 2, spread: (region.xr - region.xl) / 2 },
-    estimate: 0.35 + (left.estimate + right.estimate) / 2,
+    estimate: 0.7 + (left.estimate + right.estimate) / 2,
     weight: H + (left.weight + right.weight) / 2,
     lanes: [
       { label: LANE_LABELS[leftType], xl: leftRegion.xl, xr: leftRegion.xr },
@@ -642,6 +922,17 @@ function buildFinish(b: Builder, region: Region) {
   const h = Math.max(Math.tan(deg(31)) * ext, 260);
   b.wall({ x: region.xl - 6, y: top }, { x: c - w / 2, y: top + h }, 18, 'funnel');
   b.wall({ x: region.xr + 6, y: top }, { x: c + w / 2, y: top + h }, 18, 'funnel');
+  // Final gauntlet: a few bumpers inside the funnel, so nobody drops straight
+  // through the middle to the finish line.
+  const gauntletY = [top + h * 0.35, top + h * 0.65];
+  for (const gy of gauntletY) {
+    const spread = ((gy - top) / h) * w + (1 - (gy - top) / h) * (region.xr - region.xl) * 0.8;
+    const count = gy === gauntletY[0] ? 3 : 2;
+    for (let i = 0; i < count; i++) {
+      const gx = c + (i - (count - 1) / 2) * (spread / count) + rng.range(-12, 12);
+      b.tryAdd(rng.chance(0.5) ? b.bumper(gx, gy, rng.range(13, 17), 1.05) : b.peg(gx, gy, rng.range(8, 10)));
+    }
+  }
   const finishY = top + h + 26;
   // Collection basin below the finish line.
   const basinY = finishY + 250;
@@ -653,7 +944,7 @@ function buildFinish(b: Builder, region: Region) {
     height: finishY - region.y0,
     progress: { kind: 'vertical' },
     exit: { x: c, spread: w / 2 },
-    estimate: 0.3 + h / 1000,
+    estimate: 0.6 + h / 513,
     weight: h,
   };
   return { built, finishY, finishX1: c - w / 2, finishX2: c + w / 2, bottom: basinY + 60 };
@@ -663,18 +954,33 @@ function buildFinish(b: Builder, region: Region) {
 // Course assembly
 // ---------------------------------------------------------------------------
 
-type FillerType = 'pegs' | 'zigzag' | 'mud' | 'bumpers' | 'spinners' | 'sliders' | 'drop' | 'funnel' | 'split';
+type FillerType =
+  | 'pegs'
+  | 'zigzag'
+  | 'mud'
+  | 'bumpers'
+  | 'spinners'
+  | 'sliders'
+  | 'pendulums'
+  | 'cascade'
+  | 'trampolines'
+  | 'drop'
+  | 'funnel'
+  | 'split';
 
 const AVERAGE_ESTIMATE: Record<FillerType, number> = {
-  pegs: 1.0,
-  zigzag: 3.1,
+  pegs: 1.8,
+  zigzag: 4.0,
   mud: 4.5,
-  bumpers: 1.0,
-  spinners: 0.6,
-  sliders: 0.6,
-  drop: 0.5,
-  funnel: 0.6,
-  split: 1.8,
+  bumpers: 2.0,
+  spinners: 2.5,
+  sliders: 2.5,
+  pendulums: 2.5,
+  cascade: 2.2,
+  trampolines: 2.4,
+  drop: 1.5,
+  funnel: 1.3,
+  split: 3.5,
 };
 
 function buildSection(b: Builder, type: FillerType, region: Region): Built {
@@ -688,9 +994,15 @@ function buildSection(b: Builder, type: FillerType, region: Region): Built {
     case 'bumpers':
       return buildBumpers(b, region);
     case 'spinners':
-      return buildSpinners(b, region);
+      return buildStations(b, region, 'spinner');
     case 'sliders':
-      return buildSliders(b, region);
+      return buildStations(b, region, 'slider');
+    case 'pendulums':
+      return buildStations(b, region, 'pendulum');
+    case 'cascade':
+      return buildCascade(b, region);
+    case 'trampolines':
+      return buildTrampolines(b, region);
     case 'drop':
       return buildDrop(b, region);
     case 'funnel':
@@ -711,15 +1023,18 @@ function chooseNext(rng: Rng, prev: FillerType | 'start', pending: FillerType[],
   }
   const spare = budgetLeft - reserve;
   // Long sections are only chosen while there is time left for them.
-  const fits = (t: FillerType) => (AVERAGE_ESTIMATE[t] <= spare + 0.4 ? 1 : 0.05);
+  const fits = (t: FillerType) => (AVERAGE_ESTIMATE[t] <= spare + 0.8 ? 1 : 0.05);
   const weights: { item: FillerType; weight: number }[] = [
     { item: 'pegs', weight: 1 * fits('pegs') },
     { item: 'zigzag', weight: 1.1 * fits('zigzag') },
     { item: 'mud', weight: 0.45 * fits('mud') },
     { item: 'bumpers', weight: 1 * fits('bumpers') },
     { item: 'spinners', weight: 1 * fits('spinners') },
-    { item: 'sliders', weight: 0.9 * fits('sliders') },
-    { item: 'drop', weight: 0.6 * fits('drop') },
+    { item: 'sliders', weight: 0.8 * fits('sliders') },
+    { item: 'pendulums', weight: 0.9 * fits('pendulums') },
+    { item: 'cascade', weight: 1.3 * fits('cascade') },
+    { item: 'trampolines', weight: 1.1 * fits('trampolines') },
+    { item: 'drop', weight: 0.4 * fits('drop') },
     { item: 'funnel', weight: prev === 'funnel' ? 0 : 0.8 * fits('funnel') },
   ];
   return rng.weighted(weights.filter((w) => w.item !== prev));
@@ -771,7 +1086,7 @@ function generateOnce(seed: number, marbleCount: number): Track {
   let estimate = start.built.estimate;
 
   // The first section after the start gate must be wide (marbles fall in everywhere).
-  const first = rng.pick(['pegs', 'bumpers'] as const);
+  const first = rng.pick(['pegs', 'bumpers', 'cascade', 'trampolines'] as const);
   let built = buildSection(b, first, region(y, flow));
   push(built, y);
   y += built.height;
@@ -779,8 +1094,8 @@ function generateOnce(seed: number, marbleCount: number): Track {
   estimate += built.estimate;
   let prev: FillerType = first;
 
-  const finishEstimate = 0.65;
-  const pending: FillerType[] = rng.shuffle(['zigzag', 'split', rng.pick(['spinners', 'sliders'] as FillerType[])]);
+  const finishEstimate = 1.3;
+  const pending: FillerType[] = rng.shuffle(['zigzag', 'split', rng.pick(['spinners', 'sliders', 'pendulums'] as FillerType[])]);
   for (let guard = 0; guard < 14; guard++) {
     const budgetLeft = TARGET_RACE_SECONDS - estimate - finishEstimate;
     if (pending.length === 0 && prev !== 'split' && budgetLeft < 0.45) break;
@@ -796,6 +1111,9 @@ function generateOnce(seed: number, marbleCount: number): Track {
   const finish = buildFinish(b, region(y, flow));
   push(finish.built, y);
   estimate += finish.built.estimate;
+
+  // Plug any open shaft a lucky marble could fall straight down.
+  plugOpenShafts(b, start.gateY + 20, finish.finishY - 10, start.gateIds);
 
   // The basin at the bottom of the finish section is the floor of the course.
   const height = finish.bottom;
@@ -821,6 +1139,136 @@ function generateOnce(seed: number, marbleCount: number): Track {
     finishX2: finish.finishX2,
     estimatedSeconds: estimate,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Shaft plugging: no marble should fall far without hitting something.
+// ---------------------------------------------------------------------------
+
+/** Target: no straight drop longer than this anywhere on the course. */
+export const MAX_OPEN_DROP = 180;
+
+interface WallSurface {
+  id: number;
+  x: number;
+  side: 'L' | 'R'; // which side of the open space the wall is on
+  y0: number;
+  y1: number;
+}
+
+function verticalSurfaces(items: readonly TrackItem[]): WallSurface[] {
+  const out: WallSurface[] = [];
+  for (const it of items) {
+    if (it.kind !== 'wall' || Math.abs(it.a.x - it.b.x) > 1) continue;
+    if (it.style !== 'wall' && it.style !== 'divider') continue;
+    const y0 = Math.min(it.a.y, it.b.y);
+    const y1 = Math.max(it.a.y, it.b.y);
+    out.push({ id: it.id, x: it.a.x + it.thickness / 2, side: 'L', y0, y1 });
+    out.push({ id: it.id, x: it.a.x - it.thickness / 2, side: 'R', y0, y1 });
+  }
+  return out;
+}
+
+function plugOpenShafts(b: Builder, yTop: number, yBottom: number, ignoreIds: number[]) {
+  const { rng } = b;
+  const r = b.radius;
+  const surfaces = verticalSurfaces(b.items);
+  const map = new CoverageMap(b.items, r, ignoreIds);
+  const xl = INNER_LEFT + r + 1;
+  const xr = INNER_RIGHT - r - 1;
+
+  const nearestWall = (x: number, y: number, side: 'L' | 'R') => {
+    let best: WallSurface | null = null;
+    for (const s of surfaces) {
+      if (s.side !== side || y < s.y0 + 10 || y + 80 > s.y1) continue;
+      if (side === 'L' ? s.x > x : s.x < x) continue;
+      if (!best || Math.abs(s.x - x) < Math.abs(best.x - x)) best = s;
+    }
+    return best;
+  };
+
+  const place = (x: number, top: number, bottom: number): TrackItem | null => {
+    const lo = top + Math.min(70, (bottom - top) * 0.3);
+    const hi = Math.min(bottom - 30, top + MAX_OPEN_DROP * 0.9);
+    for (let attempt = 0; attempt < 9; attempt++) {
+      const y = rng.range(lo, Math.max(lo + 1, hi));
+      const left = nearestWall(x, y, 'L');
+      const right = nearestWall(x, y, 'R');
+      // A little extra room around fillers so marbles can't get cradled between them.
+      const tryItem = (item: TrackItem, ignore: number[] = []) =>
+        b.tryAdd(item, { ignore, minGap: 1.5 * D }) ? item : null;
+
+      // Close to a wall: a bump on the wall, or a deflector sticking out of it.
+      for (const wall of [left, right]) {
+        if (!wall || Math.abs(x - wall.x) > 100) continue;
+        for (const br of [18, 14, 10]) {
+          if (Math.abs(x - wall.x) > br * 0.75 + r + 4) continue;
+          const bump = b.peg(wall.x + (wall.side === 'L' ? -br * 0.25 : br * 0.25), y, br);
+          const addedBump = tryItem(bump, [wall.id]);
+          if (addedBump) return addedBump;
+        }
+        const length = Math.max(24, Math.abs(x - wall.x) - r + rng.range(8, 40));
+        const angle = rng.range(28, 42);
+        const dx = Math.cos(deg(angle)) * length;
+        const dy = Math.sin(deg(angle)) * length;
+        const dir = wall.side === 'L' ? 1 : -1;
+        const item: WallItem = {
+          kind: 'wall',
+          id: b.id(),
+          a: { x: wall.x - dir * 2, y },
+          b: { x: wall.x + dir * dx, y: y + dy },
+          thickness: 14,
+          style: 'deflector',
+          optional: true,
+        };
+        const added = tryItem(item, [wall.id]);
+        if (added) return added;
+      }
+
+      // Open space: a peg, a slanted plate or a small bumper.
+      const jx = x + rng.range(-10, 10);
+      const roll = rng.next();
+      const item =
+        roll < 0.5
+          ? b.peg(jx, y, rng.range(7, 9.5))
+          : roll < 0.82
+            ? b.plate(jx, y, rng.range(48, 70), rng.sign() * rng.range(24, 36))
+            : b.bumper(jx, y, rng.range(13, 17), 1.02);
+      const added = tryItem(item);
+      if (added) return added;
+    }
+    return null;
+  };
+
+  // Spots where no obstacle fits safely (e.g. right next to a spinner).
+  const hopeless = new Set<string>();
+  const key = (x: number, top: number) => `${Math.round(x / 24)}:${Math.round(top / 40)}`;
+  for (let pass = 0; pass < 4; pass++) {
+    const gaps = map.longGaps(xl, xr, yTop, yBottom, MAX_OPEN_DROP, 9).sort((a, c) => c.length - a.length);
+    let placedAny = false;
+    for (const g of gaps) {
+      // Walk down the shaft, plugging it every ~MAX_OPEN_DROP units.
+      let cursor = g.top;
+      for (let guard = 0; guard < 40 && cursor < g.bottom; guard++) {
+        const open = map.gapsAt(g.x, cursor, g.bottom).find((x) => x.length > MAX_OPEN_DROP);
+        if (!open) break;
+        if (hopeless.has(key(g.x, open.top))) {
+          cursor = open.top + MAX_OPEN_DROP * 0.5;
+          continue;
+        }
+        const item = place(open.x, open.top, open.bottom);
+        if (item) {
+          map.add(item);
+          placedAny = true;
+          cursor = open.top;
+        } else {
+          hopeless.add(key(g.x, open.top));
+          cursor = open.top + MAX_OPEN_DROP * 0.5;
+        }
+      }
+    }
+    if (!placedAny) return;
+  }
 }
 
 export interface GenerateResult {

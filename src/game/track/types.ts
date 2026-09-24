@@ -4,7 +4,18 @@ export interface Vec {
 }
 
 /** Visual flavour of a straight piece of track. */
-export type WallStyle = 'wall' | 'ramp' | 'funnel' | 'divider' | 'deflector' | 'gate' | 'basin';
+export type WallStyle =
+  | 'wall'
+  | 'ramp'
+  | 'funnel'
+  | 'divider'
+  | 'deflector'
+  | 'gate'
+  | 'basin'
+  /** Short slanted plate (waterfall sections and shaft fillers). */
+  | 'plate'
+  /** Springy bar that launches marbles. */
+  | 'trampoline';
 
 /** A thick straight line (with rounded ends). Walls, ramps, funnels... */
 export interface WallItem {
@@ -69,6 +80,20 @@ export interface SliderItem {
   phase: number;
 }
 
+/** A wrecking ball swinging on an arm. Angle = amplitude * sin(2π t / period + phase). */
+export interface PendulumItem {
+  kind: 'pendulum';
+  id: number;
+  pivotX: number;
+  pivotY: number;
+  length: number;
+  bobR: number;
+  /** Maximum swing angle from vertical (radians). */
+  amplitude: number;
+  period: number;
+  phase: number;
+}
+
 /** Slow-down area ("mud") – marbles inside get extra air drag. */
 export interface ZoneItem {
   kind: 'zone';
@@ -79,7 +104,7 @@ export interface ZoneItem {
   drag: number;
 }
 
-export type TrackItem = WallItem | PegItem | BumperItem | SpinnerItem | SliderItem | ZoneItem;
+export type TrackItem = WallItem | PegItem | BumperItem | SpinnerItem | SliderItem | PendulumItem | ZoneItem;
 
 export interface Ramp {
   /** High end. */
@@ -108,6 +133,9 @@ export type SectionType =
   | 'drop'
   | 'split'
   | 'mud'
+  | 'pendulums'
+  | 'cascade'
+  | 'trampolines'
   | 'finish';
 
 export interface Section {

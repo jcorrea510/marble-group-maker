@@ -2,9 +2,9 @@ import Matter from 'matter-js';
 import { Rng } from '../rng';
 import { pointInPolygon } from '../track/geometry';
 import { ProgressMap } from '../track/progress';
-import type { SliderItem, SpinnerItem, Track, TrackItem, ZoneItem } from '../track/types';
+import type { PendulumItem, SliderItem, SpinnerItem, Track, TrackItem, ZoneItem } from '../track/types';
 import type { Participant } from '../types';
-import { sliderOffset, spinnerAngle } from './kinematics';
+import { pendulumAngle, pendulumBob, sliderOffset, spinnerAngle } from './kinematics';
 
 const { Engine, Bodies, Body, Composite, Events } = Matter;
 
@@ -40,7 +40,7 @@ const BASE_AIR = 0.008;
 /** Safety net: after this much race time, remaining marbles are ranked by distance. */
 export const MAX_RACE_MS = 75_000;
 
-export type HitKind = 'marble' | 'bumper' | 'peg' | 'wall' | 'spinner' | 'slider';
+export type HitKind = 'marble' | 'bumper' | 'peg' | 'wall' | 'spinner' | 'slider' | 'pendulum' | 'trampoline';
 
 export type SimEvent =
   | { type: 'hit'; kind: HitKind; x: number; y: number; strength: number; marble: number; other?: number; itemId?: number }
@@ -68,6 +68,12 @@ export interface MarbleState {
   checkpoints: { x: number; y: number; progress: number }[];
   nudges: number;
   ghostSteps: number;
+  /** y of the last point where the marble was touching something. */
+  lastContactY: number;
+  /** Longest distance fallen without touching anything (after the start). */
+  maxFreeFall: number;
+  /** Where that fall started and ended (x, y0, y1) – for diagnostics. */
+  maxFreeFallAt: [number, number, number];
 }
 
 export interface SimStats {
@@ -77,10 +83,12 @@ export interface SimStats {
   nudges: number;
   rescues: number;
   outOfBounds: number;
+  /** Longest untouched fall of any marble in this race (world units). */
+  maxFreeFall: number;
 }
 
 interface Kinematic {
-  item: SpinnerItem | SliderItem;
+  item: SpinnerItem | SliderItem | PendulumItem;
   body: Matter.Body;
 }
 
@@ -98,6 +106,7 @@ export class RaceSimulation {
     nudges: 0,
     rescues: 0,
     outOfBounds: 0,
+    maxFreeFall: 0,
   };
   /** Milliseconds since "GO!". */
   raceTimeMs = 0;
@@ -105,6 +114,8 @@ export class RaceSimulation {
   worldTimeMs = 0;
   started = false;
   finishedCount = 0;
+  /** Where the anti-stuck help had to step in (diagnostics for tests). */
+  readonly nudgeLog: { x: number; y: number; rescue: boolean }[] = [];
   /** Effects the renderer can consume (drained every frame). */
   events: SimEvent[] = [];
   /** Last time (world ms) each bumper was hit – for flashing. */
@@ -117,7 +128,7 @@ export class RaceSimulation {
   private readonly gateBodies: Matter.Body[] = [];
   private readonly itemByBodyId = new Map<number, TrackItem>();
   private readonly marbleByBodyId = new Map<number, MarbleState>();
-  private readonly pendingKicks: { marble: MarbleState; nx: number; ny: number }[] = [];
+  private readonly pendingKicks: { marble: MarbleState; nx: number; ny: number; minSpeed: number }[] = [];
   private finishOrder: MarbleState[] = [];
   private readonly collisionHandler = (event: Matter.IEventCollision<Matter.Engine>) => this.onCollisionStart(event);
   private timedOut = false;
@@ -175,6 +186,9 @@ export class RaceSimulation {
         checkpoints: [],
         nudges: 0,
         ghostSteps: 0,
+        lastContactY: slot.y,
+        maxFreeFall: 0,
+        maxFreeFallAt: [slot.x, slot.y, slot.y],
       };
       this.marbleByBodyId.set(body.id, state);
       return state;
@@ -213,7 +227,7 @@ export class RaceSimulation {
               angle: Math.atan2(dy, dx),
               chamfer: rounded ? { radius: item.thickness / 2 - 0.5 } : undefined,
               friction: 0.06,
-              restitution: item.style === 'deflector' ? 0.45 : 0.25,
+              restitution: item.style === 'trampoline' ? 0.9 : item.style === 'deflector' ? 0.45 : 0.25,
               collisionFilter: filter,
               label: item.style,
             },
@@ -255,6 +269,18 @@ export class RaceSimulation {
           });
           this.kinematics.push({ item, body });
           break;
+        case 'pendulum': {
+          const bob = pendulumBob(item, pendulumAngle(item, 0));
+          body = Bodies.circle(bob.x, bob.y, item.bobR, {
+            isStatic: true,
+            restitution: 0.5,
+            friction: 0,
+            collisionFilter: filter,
+            label: 'pendulum',
+          });
+          this.kinematics.push({ item, body });
+          break;
+        }
         case 'zone':
           break;
       }
@@ -294,6 +320,8 @@ export class RaceSimulation {
     for (const k of this.kinematics) {
       if (k.item.kind === 'spinner') {
         setAngleMoving(k.body, spinnerAngle(k.item, t), true);
+      } else if (k.item.kind === 'pendulum') {
+        setPositionMoving(k.body, pendulumBob(k.item, pendulumAngle(k.item, t)), true);
       } else {
         setPositionMoving(k.body, { x: k.item.x + sliderOffset(k.item, t), y: k.item.y }, true);
       }
@@ -337,16 +365,72 @@ export class RaceSimulation {
 
     if (this.started && !this.isComplete) this.raceTimeMs += STEP_MS;
     this.applyKicks();
+    this.trackContacts();
     this.postStep();
   }
 
   private applyKicks() {
-    for (const { marble, nx, ny } of this.pendingKicks) {
+    for (const { marble, nx, ny, minSpeed } of this.pendingKicks) {
       const v = marble.body.velocity;
-      const speed = Math.max(Math.hypot(v.x, v.y), 6.5);
+      const speed = Math.max(Math.hypot(v.x, v.y), minSpeed);
       Body.setVelocity(marble.body, { x: nx * speed, y: ny * speed });
     }
     this.pendingKicks.length = 0;
+  }
+
+  /** Records how far each marble has fallen since it last touched anything. */
+  private trackContacts() {
+    if (!this.started) return;
+    const touching = new Set<number>();
+    for (const pair of this.engine.pairs.list) {
+      if (!pair.isActive) continue;
+      touching.add(pair.bodyA.parent.id);
+      touching.add(pair.bodyB.parent.id);
+      this.kickIfResting(pair);
+    }
+    for (const m of this.marbles) {
+      if (m.finished) continue;
+      const y = m.body.position.y;
+      if (touching.has(m.body.id) || m.ghostSteps > 0) {
+        m.lastContactY = y;
+      } else if (y - m.lastContactY > m.maxFreeFall) {
+        m.maxFreeFall = y - m.lastContactY;
+        m.maxFreeFallAt = [m.body.position.x, m.lastContactY, y];
+        if (m.maxFreeFall > this.stats.maxFreeFall) this.stats.maxFreeFall = m.maxFreeFall;
+      }
+      // Moving up (a bounce) resets the reference point.
+      if (y < m.lastContactY) m.lastContactY = y;
+    }
+  }
+
+  /**
+   * Bumpers and trampolines are "active" like in pinball: a marble that comes
+   * to rest on one gets kicked off again (otherwise it could sit there).
+   */
+  private kickIfResting(pair: Matter.Pair) {
+    const marble = this.marbleByBodyId.get(pair.bodyA.parent.id) ?? this.marbleByBodyId.get(pair.bodyB.parent.id);
+    if (!marble || marble.finished || marble.body.speed > 2.5) return;
+    const other = this.marbleByBodyId.has(pair.bodyA.parent.id) ? pair.bodyB : pair.bodyA;
+    const item = this.itemByBodyId.get(other.id) ?? this.itemByBodyId.get(other.parent.id);
+    if (!item) return;
+    const pos = marble.body.position;
+    if (item.kind === 'bumper') {
+      const d = Math.hypot(pos.x - item.x, pos.y - item.y) || 1;
+      this.pendingKicks.push({ marble, nx: (pos.x - item.x) / d, ny: (pos.y - item.y) / d, minSpeed: 6.5 });
+      this.bumperHits.set(item.id, this.worldTimeMs);
+    } else if (item.kind === 'wall' && item.style === 'trampoline') {
+      const ux = item.b.x - item.a.x;
+      const uy = item.b.y - item.a.y;
+      const len = Math.hypot(ux, uy) || 1;
+      let nx = -uy / len;
+      let ny = ux / len;
+      if (nx * (pos.x - item.a.x) + ny * (pos.y - item.a.y) < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      this.pendingKicks.push({ marble, nx, ny, minSpeed: 8 });
+      this.bumperHits.set(item.id, this.worldTimeMs);
+    }
   }
 
   private postStep() {
@@ -444,9 +528,9 @@ export class RaceSimulation {
     m.checkpoints.push({ x: p.x, y: p.y, progress: m.progress });
     if (m.checkpoints.length > 12) m.checkpoints.shift();
     const n = m.checkpoints.length;
-    if (n < 4) return;
+    if (n < 3) return;
 
-    const old = m.checkpoints[n - 4]; // ~1.5 s ago
+    const old = m.checkpoints[n - 3]; // ~1 s ago
     const moved = Math.hypot(p.x - old.x, p.y - old.y);
     const stalled = moved < m.radius * 0.6;
     const longAgo = n >= 12 ? m.checkpoints[0] : null; // ~5.5 s ago
@@ -456,15 +540,18 @@ export class RaceSimulation {
 
     m.nudges++;
     this.stats.nudges++;
+    if (this.nudgeLog.length < 200) this.nudgeLog.push({ x: p.x, y: p.y, rescue: m.nudges % 3 === 0 });
     m.checkpoints.length = 0;
-    if (m.nudges % 4 === 0) {
+    if (m.nudges % 3 === 0) {
       // Repeatedly stuck: let it pass through the track briefly.
       this.stats.rescues++;
       m.body.collisionFilter.mask = CATEGORY_MARBLE;
       m.ghostSteps = 14;
       Body.setVelocity(m.body, { x: 0, y: 3 });
     } else {
-      Body.setVelocity(m.body, { x: this.rng.range(-3.5, 3.5), y: -this.rng.range(2.5, 4.5) });
+      // Pop it up and toward the open middle of the course (away from walls).
+      const towardCentre = Math.sign(this.track.width / 2 - p.x) || this.rng.sign();
+      Body.setVelocity(m.body, { x: towardCentre * this.rng.range(2.5, 4.5), y: -this.rng.range(2, 3.5) });
     }
   }
 
@@ -513,18 +600,39 @@ export class RaceSimulation {
         const dx = marble.body.position.x - item.x;
         const dy = marble.body.position.y - item.y;
         const d = Math.hypot(dx, dy) || 1;
-        this.pendingKicks.push({ marble, nx: dx / d, ny: dy / d });
+        this.pendingKicks.push({ marble, nx: dx / d, ny: dy / d, minSpeed: 6.5 });
+      } else if (item.kind === 'wall' && item.style === 'trampoline') {
+        kind = 'trampoline';
+        this.bumperHits.set(item.id, this.worldTimeMs);
+        // Launch away from the bar's surface, on the side the marble hit.
+        const ux = item.b.x - item.a.x;
+        const uy = item.b.y - item.a.y;
+        const len = Math.hypot(ux, uy) || 1;
+        let nx = -uy / len;
+        let ny = ux / len;
+        if (nx * (marble.body.position.x - item.a.x) + ny * (marble.body.position.y - item.a.y) < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        // Keep most of the sliding motion along the bar, add a strong bounce.
+        const v = marble.body.velocity;
+        const along = (v.x * ux + v.y * uy) / len;
+        const bx = (ux / len) * along * 0.8 + nx * 8.5;
+        const by = (uy / len) * along * 0.8 + ny * 8.5;
+        const bl = Math.hypot(bx, by) || 1;
+        this.pendingKicks.push({ marble, nx: bx / bl, ny: by / bl, minSpeed: Math.min(11, bl) });
       } else if (item.kind === 'peg') kind = 'peg';
       else if (item.kind === 'spinner') kind = 'spinner';
       else if (item.kind === 'slider') kind = 'slider';
+      else if (item.kind === 'pendulum') kind = 'pendulum';
 
-      if (kind === 'bumper' || strength > 3) {
+      if (kind === 'bumper' || kind === 'trampoline' || strength > 3) {
         this.events.push({
           type: 'hit',
           kind,
           x: support.x,
           y: support.y,
-          strength: kind === 'bumper' ? Math.max(strength, 6) : strength,
+          strength: kind === 'bumper' || kind === 'trampoline' ? Math.max(strength, 6) : strength,
           marble: marble.index,
           itemId: item.id,
         });

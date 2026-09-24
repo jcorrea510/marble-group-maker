@@ -1,4 +1,4 @@
-import type { SliderItem, SpinnerItem, TrackItem, Vec } from './types';
+import type { PendulumItem, SliderItem, SpinnerItem, TrackItem, Vec } from './types';
 
 export const deg = (d: number) => (d * Math.PI) / 180;
 
@@ -85,6 +85,17 @@ export function sliderEndpoints(s: SliderItem, offset: number): [Vec, Vec] {
   ];
 }
 
+/** Sample positions of a pendulum's ball across its whole swing. */
+export function pendulumSweep(p: PendulumItem): Vec[] {
+  const out: Vec[] = [];
+  const steps = Math.max(4, Math.ceil((p.amplitude * 2) / ((5 * Math.PI) / 180)));
+  for (let i = 0; i <= steps; i++) {
+    const a = -p.amplitude + (2 * p.amplitude * i) / steps;
+    out.push({ x: p.pivotX + Math.sin(a) * p.length, y: p.pivotY + Math.cos(a) * p.length });
+  }
+  return out;
+}
+
 export function spinnerReach(s: SpinnerItem): number {
   return s.armLength + s.armThickness / 2;
 }
@@ -114,6 +125,8 @@ export function shapesOf(item: TrackItem): Shape[] {
       shapes.push({ type: 'capsule', a: r0, b: r1, r: item.thickness / 2 });
       return shapes;
     }
+    case 'pendulum':
+      return pendulumSweep(item).map((c) => ({ type: 'circle' as const, c, r: item.bobR }));
     case 'zone':
       return [];
   }
@@ -138,7 +151,7 @@ export function itemGap(a: TrackItem, b: TrackItem): number {
 }
 
 export function isMoving(item: TrackItem): boolean {
-  return item.kind === 'spinner' || item.kind === 'slider';
+  return item.kind === 'spinner' || item.kind === 'slider' || item.kind === 'pendulum';
 }
 
 /** Vertical extent of an item (for quick culling). */
@@ -158,6 +171,10 @@ export function itemYRange(item: TrackItem): [number, number] {
     case 'slider': {
       const half = (Math.abs(Math.sin(item.angle)) * item.length) / 2 + item.thickness;
       return [item.y - half, item.y + half];
+    }
+    case 'pendulum': {
+      const ys = pendulumSweep(item).map((p) => p.y);
+      return [Math.min(...ys) - item.bobR, Math.max(...ys) + item.bobR];
     }
     case 'zone': {
       const ys = item.polygon.map((p) => p.y);
