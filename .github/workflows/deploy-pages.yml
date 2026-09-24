@@ -1,8 +1,14 @@
 name: Deploy to GitHub Pages
 
-# Run this manually from the Actions tab after enabling
-# Settings → Pages → Source: "GitHub Actions" (see README).
+# Deploys the site whenever `main` changes:
+#  - on every push to main (e.g. when you merge a pull request yourself),
+#  - when the "Auto-merge Claude PRs" workflow starts it after merging
+#    (merges made by a workflow don't create a push event for other workflows),
+#  - or manually from the Actions tab.
+# Requires Settings → Pages → Source: "GitHub Actions" (see README).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
