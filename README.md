@@ -46,12 +46,22 @@ npm run preview  # try the production build locally
 
 ### Put it online for free (GitHub Pages)
 
-This repository includes a ready-made workflow. One-time setup:
+This repository includes a ready-made workflow. One-time setup: on GitHub, open **Settings → Pages** and set **Source** to **GitHub Actions**.
 
-1. On GitHub, open **Settings → Pages** and set **Source** to **GitHub Actions**.
-2. Open the **Actions** tab, choose **Deploy to GitHub Pages**, and click **Run workflow**.
+From then on the site redeploys automatically every time `main` changes, and your app is live at `https://<your-username>.github.io/marble-group-maker/`. You can also start a deploy by hand from the **Actions** tab (**Deploy to GitHub Pages → Run workflow**).
 
-After a minute your app is live at `https://<your-username>.github.io/marble-group-maker/`.
+### How changes get published (automatic)
+
+Changes made by Claude arrive as pull requests from branches named `claude/...`. They merge themselves – no manual review needed:
+
+1. The pull request runs **CI**: lint, typecheck, unit tests, a production build, and the browser tests.
+2. When CI passes, the **Auto-merge Claude PRs** workflow merges the pull request into `main`. It only does this if:
+   - the branch starts with `claude/` and lives in this repository (never a fork),
+   - CI passed on the exact commit being merged, and every other check on it passed too,
+   - the pull request is open, not a draft, and targets `main`.
+3. It then starts **Deploy to GitHub Pages**, so the live site updates a minute later.
+
+If CI fails, nothing is merged; the pull request just waits for a fix. One deliberate exception: pull requests that change the automation or CI themselves (anything in `.github/workflows/`) are never merged automatically – the workflow leaves a comment asking you to merge by hand, so the safety checks can't be weakened without you seeing it. Pull requests from any other branch are not touched and merge the normal way.
 
 ---
 
