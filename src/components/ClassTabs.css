@@ -1,0 +1,142 @@
+.class-tabs {
+  margin-bottom: 22px;
+}
+
+.class-tabs-scroll {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: none;
+}
+
+.class-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.class-tab {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 42px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.2s;
+}
+
+.class-tab:hover {
+  border-color: var(--line-strong);
+}
+
+.class-tab.active {
+  background: rgba(124, 92, 255, 0.22);
+  border-color: rgba(157, 133, 255, 0.65);
+  box-shadow: 0 8px 26px -12px rgba(124, 92, 255, 0.8);
+}
+
+.class-tab-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 14px 0 16px;
+  border-radius: var(--radius-pill);
+  font-weight: 750;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.class-tab.active .class-tab-main {
+  color: var(--text);
+  padding-right: 6px;
+}
+
+.class-tab-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.class-tab-count {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.class-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+}
+
+.class-tab-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--text-dim);
+}
+
+.class-tab-icon:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.class-tab-icon.danger:hover {
+  color: var(--danger);
+  background: rgba(255, 92, 108, 0.14);
+}
+
+.class-rename {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 14px;
+}
+
+.class-rename input {
+  width: 150px;
+  height: 30px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-weight: 750;
+}
+
+.class-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  border: 1px dashed var(--line-strong);
+  color: var(--text-dim);
+  font-weight: 750;
+  white-space: nowrap;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.class-add:hover {
+  color: var(--text);
+  border-color: rgba(157, 133, 255, 0.7);
+  background: rgba(124, 92, 255, 0.1);
+}

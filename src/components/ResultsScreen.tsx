@@ -87,17 +87,11 @@ export function ResultsScreen({ result, onRaceAgain, onEdit, toast }: Props) {
       <section className="results-hero">
         <div className="hero-text">
           <div className="eyebrow">
-            Race {result.raceNumber} · Course {result.courseCode} · {formatTime(result.durationMs)}
+            {result.className ? `${result.className} · ` : ''}Race {result.raceNumber} · Course {result.courseCode}
           </div>
           <h1>
             <span className="grad-text">{winner.name}</span> takes the win!
           </h1>
-          <p>
-            {result.order.length} marbles finished. The finishing order made {result.groupCount}{' '}
-            {result.groupCount === 1 ? 'group' : 'groups'}: the first{' '}
-            {groups[0].length === 1 ? 'finisher goes' : `${groups[0].length} finishers go`} to Group 1, the next to Group 2,
-            and so on.
-          </p>
           <div className="hero-actions">
             <button className="btn btn-primary btn-lg" onClick={onRaceAgain} data-testid="race-again">
               <RepeatIcon size={18} /> Race again
@@ -106,7 +100,6 @@ export function ResultsScreen({ result, onRaceAgain, onEdit, toast }: Props) {
               <EditIcon size={18} /> Edit participants
             </button>
           </div>
-          <p className="hero-footnote">Race again keeps everyone and the group count, builds a brand-new course and reshuffles the start.</p>
         </div>
 
         <div className="podium" aria-label="Top three">
@@ -175,16 +168,10 @@ export function ResultsScreen({ result, onRaceAgain, onEdit, toast }: Props) {
 
 function GroupCard({ index, members }: { index: number; members: FinishEntry[] }) {
   const color = groupColor(index);
-  const first = members[0]?.position;
-  const last = members[members.length - 1]?.position;
   return (
     <article className="group-card" style={{ '--g': color, animationDelay: `${0.1 + index * 0.07}s` } as CSSProperties} data-testid="group-card">
       <header>
         <h3>Group {index + 1}</h3>
-        <span className="group-card-range">
-          {members.length === 1 ? `${placeLabel(first)} place` : `Places ${first}–${last}`} · {members.length}{' '}
-          {members.length === 1 ? 'person' : 'people'}
-        </span>
       </header>
       <ol>
         {members.map((m) => (

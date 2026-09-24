@@ -199,7 +199,6 @@ export function RaceScreen({ config, muted, onToggleMute, onComplete, onExit }: 
                   <span>{winner.name} wins!</span>
                 </div>
               )}
-              <div className="finish-sub">Sorting everyone into groups…</div>
             </div>
           )}
         </div>
@@ -207,7 +206,6 @@ export function RaceScreen({ config, muted, onToggleMute, onComplete, onExit }: 
         <aside className="race-board" aria-label="Live standings">
           <div className="board-head">
             <span className="board-title">Standings</span>
-            <span className="board-hint">Tap a name to follow</span>
           </div>
           <div className="board-scroll">
             <ol className="board-list" style={{ height: total * ROW_HEIGHT }} data-testid="leaderboard">

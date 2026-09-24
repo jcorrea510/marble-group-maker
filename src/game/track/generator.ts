@@ -552,9 +552,8 @@ function buildStation(
   const extent = Math.max(centers[0] - w / 2 - region.xl, region.xr - (centers[centers.length - 1] + w / 2));
   let H = Math.tan(slope) * extent;
   let rise = 0;
-  let inner = 0;
   if (openings === 2) {
-    inner = centers[1] - w / 2 - (centers[0] + w / 2);
+    const inner = centers[1] - w / 2 - (centers[0] + w / 2);
     rise = Math.tan(deg(34)) * (inner / 2);
     H = Math.max(H, rise + 25);
   }

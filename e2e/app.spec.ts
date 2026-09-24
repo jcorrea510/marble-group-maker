@@ -144,11 +144,10 @@ test('10 participants / 3 groups: uneven groups are 4, 3, 3', async ({ page }) =
   await freshStart(page, '?speed=3');
   await pasteNames(page, names(10).join('\n'));
   await setGroups(page, 3);
-  await expect(page.getByTestId('group-preview')).toContainText('1 × 4 people, 2 × 3 people');
+  await expect(page.getByTestId('group-preview').locator('.group-bar-size')).toHaveText(['4', '3', '3']);
   await page.getByTestId('start-race').click();
   const { order } = await watchRace(page, 10);
   expectGroups(await readGroups(page), order, [4, 3, 3]);
-  await expect(page.getByTestId('group-card').first()).toContainText('Places 1–4');
 });
 
 test('24 participants / 5 groups', async ({ page }) => {
@@ -271,4 +270,100 @@ test('race again re-checks the setup if the list was edited to something invalid
   // Back on setup with an explanation instead of an impossible race.
   await expect(page.getByTestId('start-race')).toBeDisabled();
   await expect(page.getByTestId('setup-message')).toContainText("can't make 3 groups from 2 people");
+});
+
+test('people per group: 10 people in groups of 4 become 4, 3, 3', async ({ page }) => {
+  await freshStart(page, '?speed=4');
+  await pasteNames(page, names(10).join('\n'));
+  await page.getByTestId('mode-size').click();
+  await setGroups(page, 4);
+  await expect(page.getByTestId('group-preview').locator('.group-bar-size')).toHaveText(['4', '3', '3']);
+  await page.getByTestId('start-race').click();
+  const { order } = await watchRace(page, 10);
+  expectGroups(await readGroups(page), order, [4, 3, 3]);
+  // The setting is remembered for Race again.
+  await page.getByTestId('race-again').click();
+  const second = await watchRace(page, 10);
+  expectGroups(await readGroups(page), second.order, [4, 3, 3]);
+});
+
+test('class periods: separate saved lists that survive a refresh', async ({ page }) => {
+  await freshStart(page, '?speed=4');
+  const tabs = page.getByTestId('class-tab');
+  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toContainText('Period 1');
+  await pasteNames(page, 'Ann\nBen\nCal\nDee');
+
+  // A second period with its own list and setting.
+  await page.getByTestId('add-class').click();
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(1)).toContainText('Period 2');
+  await expect(page.getByTestId('participant-count')).toContainText('0');
+  await pasteNames(page, 'Xia\nYul\nZed\nWes\nVal\nUma');
+  await setGroups(page, 3);
+
+  // Rename it.
+  await tabs.nth(1).click();
+  await page.getByTestId('class-name-input').fill('Period 2 Biology');
+  await page.keyboard.press('Enter');
+  await expect(tabs.nth(1)).toContainText('Period 2 Biology');
+
+  // Switching shows each period's own names and group count.
+  await tabs.first().click();
+  await expect(page.getByTestId('participant-list').locator('.person-name')).toHaveText(['Ann', 'Ben', 'Cal', 'Dee']);
+  await expect(page.getByTestId('group-count')).toHaveValue('2');
+  await tabs.nth(1).click();
+  await expect(page.getByTestId('participant-count')).toContainText('6');
+  await expect(page.getByTestId('group-count')).toHaveValue('3');
+
+  // Race period 2; its results are saved with it.
+  await page.getByTestId('start-race').click();
+  const { order } = await watchRace(page, 6);
+  await expect(page.getByTestId('results-screen')).toContainText('Period 2 Biology');
+
+  // Everything is still there after a refresh.
+  await page.reload();
+  await expect(page.getByTestId('results-screen')).toBeVisible();
+  expect(await readFinishOrder(page)).toEqual(order);
+  await page.getByTestId('edit-participants').click();
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(1)).toContainText('Period 2 Biology');
+  await expect(page.getByTestId('last-results')).toBeVisible();
+  await tabs.first().click();
+  await expect(page.getByTestId('participant-count')).toContainText('4');
+  await expect(page.getByTestId('last-results')).toHaveCount(0); // period 1 hasn't raced yet
+
+  // Deleting can be undone.
+  await tabs.nth(1).click();
+  await page.getByTestId('delete-class').click();
+  await expect(tabs).toHaveCount(1);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(tabs).toHaveCount(2);
+  await expect(page.getByTestId('participant-count')).toContainText('6');
+});
+
+test('a list saved by the previous version moves into Period 1', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem(
+      'marble-group-maker:v1',
+      JSON.stringify({
+        participants: [
+          { id: 'a', name: 'Old One', colorIndex: 0 },
+          { id: 'b', name: 'Old Two', colorIndex: 1 },
+          { id: 'c', name: 'Old Three', colorIndex: 2 },
+        ],
+        groupCount: 3,
+        lastResult: null,
+        showResults: false,
+        raceCount: 4,
+        muted: false,
+      }),
+    );
+  });
+  await page.reload();
+  await expect(page.getByTestId('class-tab').first()).toContainText('Period 1');
+  await expect(page.getByTestId('participant-list').locator('.person-name')).toHaveText(['Old One', 'Old Two', 'Old Three']);
+  await expect(page.getByTestId('group-count')).toHaveValue('3');
 });

@@ -14,15 +14,16 @@ Paste a list of names, choose how many groups you want, and press start. Everyon
 
 ## How to use it
 
-1. **Add people.** Type a name and press <kbd>Enter</kbd>, or paste a whole list (one name per line) – everyone is added at once. Commas and numbered lists (`1. John`) work too. Duplicate names get a number (`Alex 2`) so every marble stays unique.
-2. **Choose the number of groups** with the − / + buttons or the quick picks. A live preview shows how big each group will be.
-3. **Shuffle** the starting grid if you like, then press **Start the race** (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>).
-4. Watch the course preview, the **3 – 2 – 1 – GO!** countdown, and the race. Click a name in the standings to follow that marble. The ⛶ button goes fullscreen (handy for a projector).
-5. The results show the **podium**, the **group cards** and the **full finishing order**. Use **Race again** for a new course with the same people, **Edit participants** to change the list, or **Copy groups** to paste them into a chat or document.
+1. **Pick a class.** The tabs at the top hold your saved classes – *Period 1*, *Period 2* and so on. Each one keeps its own list of names, group setting and last results. Click **New period** to add one, click the active tab (or its pencil) to rename it, and use the bin to delete it (you can undo).
+2. **Add people.** Type a name and press <kbd>Enter</kbd>, or paste a whole list (one name per line) – everyone is added at once. Commas and numbered lists (`1. John`) work too. Duplicate names get a number (`Alex 2`) so every marble stays unique.
+3. **Choose the groups:** either the **number of groups**, or **people per group** (e.g. "groups of 4"). Use the − / + buttons or the quick picks; a preview shows how big each group will be.
+4. **Shuffle** the starting grid if you like, then press **Start the race** (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>).
+5. Watch the course preview, the **3 – 2 – 1 – GO!** countdown, and the race. Click a name in the standings to follow that marble. The ⛶ button goes fullscreen (handy for a projector).
+6. The results show the **podium**, the **group cards** and the **full finishing order**. Use **Race again** for a new course with the same people, **Edit participants** to change the list, or **Copy groups** to paste them into a chat or document.
 
-**How groups are formed:** the finishing order is cut into consecutive groups. With 12 people and 3 groups, places 1–4 are Group 1, places 5–8 Group 2 and places 9–12 Group 3. If it doesn't divide evenly, sizes differ by at most one (10 people in 3 groups → 4, 3, 3).
+**How groups are formed:** the finishing order is cut into consecutive groups. With 12 people and 3 groups, places 1–4 are Group 1, places 5–8 Group 2 and places 9–12 Group 3. If it doesn't divide evenly, sizes differ by at most one (10 people in 3 groups → 4, 3, 3). With "people per group", no group is bigger than the number you chose (10 people in groups of 4 → 4, 3, 3).
 
-Your list, group count and last results are saved in your browser, so refreshing the page loses nothing. Nothing is sent to any server.
+Your classes, names, group settings and last results are saved in your browser, so refreshing the page (or coming back tomorrow) loses nothing. Nothing is sent to any server. Saved data lives in the browser you use – a different computer or browser starts empty.
 
 ---
 
@@ -76,20 +77,25 @@ Each race gets a fresh random "seed" (a number) that the course generator uses t
 | Section | What happens |
 | --- | --- |
 | Peg forest | Marbles pinball through rows of pegs |
+| Waterfall | A staggered wall of slanted plates marbles tumble down |
+| Trampoline park | Springy bars that launch marbles into the air |
 | Switchbacks (zig-zag ramps) | Long ramps, sometimes with a gap that slow marbles fall through |
 | Mud slide | Sticky patches slow marbles down |
 | Funnel / double drain | Everyone squeezes through one or two openings |
 | Bumper bash | Springy bumpers kick marbles around |
-| Spin cycle | Rotating paddle wheels bat marbles aside |
-| Shuttle bars | Tilted bars slide back and forth |
+| Spin cycle | Funnel shelves drop marbles onto rotating paddle wheels |
+| Wrecking balls | Funnel shelves drop marbles past swinging pendulums |
+| Sliding doors | Funnel shelves drop marbles onto shuttling bars |
 | Free fall | A drop with deflectors on the walls |
 | The split | The track divides into two lanes with different obstacles, then merges again |
-| Final funnel | The checkered finish line |
+| Final funnel | A last gauntlet of bumpers, then the checkered finish line |
 
-Random doesn't mean chaotic: the generator follows **playability rules** so a course can never trap a marble – every gap is wider than the biggest marble, every ramp slopes downhill, moving parts get extra room, and a validator double-checks the finished course (and rebuilds it if anything is off). As a final safety net, a marble that hasn't moved for a couple of seconds (for example, balanced perfectly on top of a peg) gets a tiny random pop. In the stress test – 120 complete races with 2 to 50 marbles, about 2,450 marbles in total – every race finished, no marble ever left the course, and that little pop was needed for roughly 1 marble in 80.
+**No lucky free rides.** After a course is built, the generator scans every column of it for open shafts a marble could fall straight down, and plugs them with pegs, slanted plates, small bumpers, wall bumps and deflectors. Moving obstacles sit under funnel shelves, so every marble has to go through them. The physics also records how far each marble ever falls without touching anything: the typical marble's longest untouched drop is about a third of a screen height.
+
+Random doesn't mean chaotic: the generator follows **playability rules** so a course can never trap a marble – every gap is wider than the biggest marble, every ramp slopes downhill, moving parts get extra room, and a validator double-checks the finished course (and rebuilds it if anything is off). Bumpers and trampolines kick any marble that comes to rest on them, like in pinball. As a final safety net, a marble that hasn't moved for about a second (for example, balanced perfectly on top of a peg) gets a small pop toward the open middle of the course. In the stress test – 120 complete races with 2 to 50 marbles, about 2,450 marbles in total – every race finished and no marble ever left the course; that little pop was needed for about 1 marble in 25.
 
 ### About 20 seconds
-The course generator estimates how long each section takes (these estimates were measured from hundreds of simulated races) and adds sections until the course is about 20 seconds long. While you watch, the screen can play the race slightly faster or slower (like fast-forwarding a video) to land close to 20 seconds. **This never changes what happens in the race** – the physics always runs in the same fixed time steps.
+The course generator estimates how long each section takes (these estimates were measured from hundreds of simulated races) and adds sections until the course is about 20 seconds long. While you watch, the screen can play the race slightly faster or slower (like fast-forwarding a video) to land close to 20 seconds, and once most marbles have finished, the last stragglers are shown in fast-forward. **This never changes what happens in the race** – the physics always runs in the same fixed time steps.
 
 ### Watching the race
 - The camera follows the leading pack; a minimap on the right shows the whole course.
@@ -104,10 +110,12 @@ The course generator estimates how long each section takes (these estimates were
 ```
 src/
   App.tsx                     Screens and app state (setup → race → results)
+  storage.ts                  Saved classes (periods) in the browser
   components/                 The three screens and small UI pieces
   game/
     track/generator.ts        Builds a random but playable course
     track/validate.ts         Double-checks every course is playable
+    track/coverage.ts         Finds open shafts where a marble could fall untouched
     physics/raceSimulation.ts The physics race (Matter.js) and finish-line detection
     raceController.ts         Race phases, pacing, camera and effects
     render/                   Canvas drawing: course, marbles, particles, minimap
@@ -129,7 +137,7 @@ npm run lint      # code style checks
 npm run typecheck # TypeScript checks
 ```
 
-The browser tests cover: pasting names, invalid setups, 4 people / 2 groups (checking the race takes about 20 seconds), 10 people / 3 groups (uneven), 24 people / 5 groups, several races in a row with **Race again** (each on a different course), editing participants, refreshing the page, keyboard shortcuts, the phone layout, and that there are no errors in the browser console.
+The browser tests cover: pasting names, invalid setups, 4 people / 2 groups (checking the race takes about 20 seconds), 10 people / 3 groups (uneven), 24 people / 5 groups, "people per group", several races in a row with **Race again** (each on a different course), editing participants, saved class periods (switching, renaming, deleting with undo, surviving a refresh), upgrading data saved by the previous version, refreshing the page, keyboard shortcuts, the phone layout, and that there are no errors in the browser console.
 
 ## Tech
 
